@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 
 /**
  * OverlayService는 화면 위에 항상 떠 있는 오버레이 버튼을 표시하는 서비스입니다.
@@ -141,6 +142,7 @@ class OverlayService : LifecycleService() {
     private fun createOverlay() {
         val composeView = ComposeView(this).apply {
             setViewTreeLifecycleOwner(this@OverlayService)
+            setViewTreeSavedStateRegistryOwner(this@OverlayService)
             setContent {
                 MaterialTheme {
                     OverlayButton()
