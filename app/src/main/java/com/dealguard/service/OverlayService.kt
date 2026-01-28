@@ -16,11 +16,15 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import com.dealguard.R
 import com.dealguard.domain.repository.ScamAlertRepository
 import com.dealguard.domain.model.ScamAlert
+import com.dealguard.domain.model.ScamAnalysis
+import com.dealguard.domain.model.ScamType
+import com.dealguard.domain.model.DetectionMethod
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,6 +33,12 @@ import kotlinx.coroutines.launch
 import java.util.Date
 import javax.inject.Inject
 
+/**
+ * 스캠 경고 오버레이 서비스
+ *
+ * 스캠이 탐지되면 화면 상단에 경고 배너를 표시합니다.
+ * LLM이 생성한 경고 메시지, 위험 요소, 의심 문구를 함께 표시합니다.
+ */
 @AndroidEntryPoint
 class OverlayService : Service() {
 
@@ -44,7 +54,16 @@ class OverlayService : Service() {
         private const val TAG = "OverlayService"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "overlay_service_channel"
-        private const val AUTO_DISMISS_DELAY = 10000L // 10 seconds
+        private const val AUTO_DISMISS_DELAY = 15000L // 15 seconds (증가)
+
+        // Intent extra keys
+        const val EXTRA_CONFIDENCE = "confidence"
+        const val EXTRA_REASONS = "reasons"
+        const val EXTRA_SOURCE_APP = "sourceApp"
+        const val EXTRA_WARNING_MESSAGE = "warningMessage"
+        const val EXTRA_SCAM_TYPE = "scamType"
+        const val EXTRA_SUSPICIOUS_PARTS = "suspiciousParts"
+        const val EXTRA_DETECTED_KEYWORDS = "detectedKeywords"
     }
 
     override fun onCreate() {
@@ -54,17 +73,42 @@ class OverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val confidence = intent?.getFloatExtra("confidence", 0.5f) ?: 0.5f
-        val reasons = intent?.getStringExtra("reasons") ?: "스캠 의심"
-        val sourceApp = intent?.getStringExtra("sourceApp") ?: "Unknown"
+        // Intent에서 데이터 추출
+        val confidence = intent?.getFloatExtra(EXTRA_CONFIDENCE, 0.5f) ?: 0.5f
+        val reasonsRaw = intent?.getStringExtra(EXTRA_REASONS) ?: "스캠 의심"
+        val sourceApp = intent?.getStringExtra(EXTRA_SOURCE_APP) ?: "Unknown"
+        val warningMessage = intent?.getStringExtra(EXTRA_WARNING_MESSAGE)
+        val scamTypeStr = intent?.getStringExtra(EXTRA_SCAM_TYPE) ?: "UNKNOWN"
+        val suspiciousParts = intent?.getStringArrayListExtra(EXTRA_SUSPICIOUS_PARTS) ?: arrayListOf()
+        val detectedKeywords = intent?.getStringArrayListExtra(EXTRA_DETECTED_KEYWORDS) ?: arrayListOf()
 
-        Log.i(TAG, "Showing overlay: confidence=$confidence, sourceApp=$sourceApp")
+        // String을 List로 변환 (기존 호환성)
+        val reasons = if (reasonsRaw.contains(",")) {
+            reasonsRaw.split(",").map { it.trim() }
+        } else {
+            listOf(reasonsRaw)
+        }
+
+        val scamType = try {
+            ScamType.valueOf(scamTypeStr)
+        } catch (e: Exception) {
+            ScamType.UNKNOWN
+        }
+
+        Log.i(TAG, "Showing overlay: confidence=$confidence, scamType=$scamType, sourceApp=$sourceApp")
 
         // Save alert to database
-        saveAlert(confidence, reasons, sourceApp)
+        saveAlert(confidence, reasons, sourceApp, warningMessage, scamType, suspiciousParts)
 
         // Show overlay
-        showOverlayWarning(confidence, reasons, sourceApp)
+        showOverlayWarning(
+            confidence = confidence,
+            reasons = reasons,
+            sourceApp = sourceApp,
+            warningMessage = warningMessage,
+            scamType = scamType,
+            suspiciousParts = suspiciousParts
+        )
 
         // Start foreground service
         startForeground(NOTIFICATION_ID, createNotification())
@@ -72,7 +116,17 @@ class OverlayService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun showOverlayWarning(confidence: Float, reasons: String, sourceApp: String) {
+    /**
+     * 경고 오버레이 표시
+     */
+    private fun showOverlayWarning(
+        confidence: Float,
+        reasons: List<String>,
+        sourceApp: String,
+        warningMessage: String?,
+        scamType: ScamType,
+        suspiciousParts: List<String>
+    ) {
         // Remove existing overlay if any
         removeOverlay()
 
@@ -80,27 +134,51 @@ class OverlayService : Service() {
         val inflater = LayoutInflater.from(this)
         overlayView = inflater.inflate(R.layout.overlay_scam_warning, null)
 
-        // Configure view based on confidence level
+        // Configure background color based on confidence level
         val backgroundColor = when {
-            confidence >= 0.9f -> Color.parseColor("#D32F2F") // Red
-            confidence >= 0.7f -> Color.parseColor("#F57C00") // Orange
-            else -> Color.parseColor("#FBC02D") // Yellow
+            confidence >= 0.9f -> Color.parseColor("#D32F2F") // Red - 매우 위험
+            confidence >= 0.7f -> Color.parseColor("#F57C00") // Orange - 위험
+            confidence >= 0.5f -> Color.parseColor("#FFA000") // Amber - 주의
+            else -> Color.parseColor("#FBC02D") // Yellow - 낮은 위험
         }
-
         overlayView?.setBackgroundColor(backgroundColor)
 
-        // Set text
-        overlayView?.findViewById<TextView>(R.id.warning_message)?.text =
-            "⚠️ 스캠 의심 메시지 감지!"
+        // 스캠 유형 표시
+        overlayView?.findViewById<TextView>(R.id.scam_type_text)?.text = getScamTypeLabel(scamType)
 
+        // 위험도 퍼센트 표시
         overlayView?.findViewById<TextView>(R.id.confidence_text)?.text =
-            "위험도: ${(confidence * 100).toInt()}%"
+            "${(confidence * 100).toInt()}%"
 
-        overlayView?.findViewById<TextView>(R.id.reasons_text)?.text = reasons
+        // LLM 생성 경고 메시지 또는 기본 메시지
+        val displayMessage = warningMessage ?: generateDefaultWarning(scamType, confidence)
+        overlayView?.findViewById<TextView>(R.id.warning_message)?.text = displayMessage
+
+        // 위험 요소 목록 표시
+        val reasonsContainer = overlayView?.findViewById<LinearLayout>(R.id.reasons_container)
+        val reasonsTextView = overlayView?.findViewById<TextView>(R.id.reasons_text)
+
+        if (reasons.isNotEmpty() && reasons.first().isNotBlank()) {
+            reasonsContainer?.visibility = View.VISIBLE
+            reasonsTextView?.text = reasons.joinToString("\n") { "• $it" }
+        } else {
+            reasonsContainer?.visibility = View.GONE
+        }
+
+        // 의심 문구 표시
+        val suspiciousContainer = overlayView?.findViewById<LinearLayout>(R.id.suspicious_parts_container)
+        val suspiciousTextView = overlayView?.findViewById<TextView>(R.id.suspicious_parts_text)
+
+        if (suspiciousParts.isNotEmpty()) {
+            suspiciousContainer?.visibility = View.VISIBLE
+            suspiciousTextView?.text = suspiciousParts.joinToString(", ") { "\"$it\"" }
+        } else {
+            suspiciousContainer?.visibility = View.GONE
+        }
 
         // Set button listeners
         overlayView?.findViewById<Button>(R.id.btn_details)?.setOnClickListener {
-            // TODO: Open detail activity
+            // TODO: Open detail activity with full analysis
             removeOverlay()
             stopSelf()
         }
@@ -128,7 +206,7 @@ class OverlayService : Service() {
             windowManager?.addView(overlayView, params)
             Log.d(TAG, "Overlay view added successfully")
 
-            // Auto-dismiss after 10 seconds
+            // Auto-dismiss after delay
             handler.postDelayed({
                 removeOverlay()
                 stopSelf()
@@ -139,17 +217,84 @@ class OverlayService : Service() {
         }
     }
 
-    private fun saveAlert(confidence: Float, reasons: String, sourceApp: String) {
+    /**
+     * 스캠 유형 라벨 반환
+     */
+    private fun getScamTypeLabel(scamType: ScamType): String {
+        return when (scamType) {
+            ScamType.INVESTMENT -> "투자 사기 의심"
+            ScamType.USED_TRADE -> "중고거래 사기 의심"
+            ScamType.PHISHING -> "피싱 의심"
+            ScamType.IMPERSONATION -> "사칭 의심"
+            ScamType.ROMANCE -> "로맨스 스캠 의심"
+            ScamType.LOAN -> "대출 사기 의심"
+            ScamType.SAFE -> "정상"
+            ScamType.UNKNOWN -> "사기 의심"
+        }
+    }
+
+    /**
+     * 기본 경고 메시지 생성 (LLM 미사용 시)
+     */
+    private fun generateDefaultWarning(scamType: ScamType, confidence: Float): String {
+        val level = when {
+            confidence >= 0.8f -> "높은"
+            confidence >= 0.6f -> "중간"
+            else -> "낮은"
+        }
+
+        return when (scamType) {
+            ScamType.INVESTMENT ->
+                "이 메시지는 투자 사기로 의심됩니다. 고수익 보장 투자는 대부분 사기입니다."
+
+            ScamType.USED_TRADE ->
+                "중고거래 사기가 의심됩니다. 선입금 요구 시 직접 만나서 거래하세요."
+
+            ScamType.PHISHING ->
+                "피싱 링크가 포함된 것 같습니다. 의심스러운 링크를 클릭하지 마세요."
+
+            ScamType.IMPERSONATION ->
+                "사칭 사기가 의심됩니다. 공식 채널을 통해 신원을 확인하세요."
+
+            ScamType.LOAN ->
+                "대출 사기가 의심됩니다. 선수수료를 요구하는 대출은 불법입니다."
+
+            else ->
+                "$level 위험도의 사기 의심 메시지입니다. 주의하세요."
+        }
+    }
+
+    /**
+     * 알림 저장
+     */
+    private fun saveAlert(
+        confidence: Float,
+        reasons: List<String>,
+        sourceApp: String,
+        warningMessage: String?,
+        scamType: ScamType,
+        suspiciousParts: List<String>
+    ) {
         serviceScope.launch(Dispatchers.IO) {
             try {
+                // ScamAnalysis 생성
+                val analysis = ScamAnalysis(
+                    isScam = true,
+                    confidence = confidence,
+                    reasons = reasons,
+                    detectedKeywords = suspiciousParts,
+                    detectionMethod = DetectionMethod.HYBRID,
+                    scamType = scamType,
+                    warningMessage = warningMessage,
+                    suspiciousParts = suspiciousParts
+                )
+
                 val alert = ScamAlert(
                     id = 0,
-                    message = reasons,
-                    confidence = confidence,
+                    text = warningMessage ?: reasons.joinToString(", "),
                     sourceApp = sourceApp,
-                    detectedKeywords = emptyList(),
-                    reasons = listOf(reasons),
-                    timestamp = Date(),
+                    analysis = analysis,
+                    timestamp = System.currentTimeMillis(),
                     isDismissed = false
                 )
                 scamAlertRepository.insertAlert(alert)
