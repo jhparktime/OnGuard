@@ -12,7 +12,10 @@
 
 ## 📱 주요 기능
 
-- ✅ **플랫폼 무관 모니터링**: 카카오톡, 텔레그램, 왓츠앱 등 모든 메신저 지원
+- ✅ **플랫폼 무관 모니터링**: 18개 이상의 메신저/거래 앱 지원
+  - 메신저: 카카오톡, 텔레그램, 왓츠앱, 페이스북 메신저, 인스타그램, 라인, 디스코드 등
+  - SMS/MMS: Google Messages, Samsung Messages, 기본 메시지 앱
+  - 거래 플랫폼: 당근마켓
 - 🛡️ **실시간 스캠 탐지**: Rule-based + On-device AI 하이브리드 분석
 - 🚨 **즉시 경고 오버레이**: 위험 감지 시 화면 상단 배너 표시
 - 🔐 **프라이버시 우선**: 모든 분석은 온디바이스에서 수행 (서버 전송 없음)
@@ -28,6 +31,37 @@
 | 서버로 데이터 전송 | **온디바이스 처리** |
 | 사후 신고 | **실시간 경고** |
 | 느린 반응 속도 | **100ms 이하 지연** |
+
+---
+
+## 📱 지원 앱 목록
+
+### 메신저 앱 (9개)
+- 카카오톡 (com.kakao.talk)
+- 텔레그램 (org.telegram.messenger)
+- 왓츠앱 (com.whatsapp)
+- 페이스북 메신저 (com.facebook.orca)
+- 인스타그램 (com.instagram.android)
+- 라인 (jp.naver.line.android)
+- 위챗 (com.tencent.mm)
+- 디스코드 (com.discord)
+- 스냅챗 (com.snapchat.android)
+
+### SMS/MMS 앱 (3개)
+- Google Messages (com.google.android.apps.messaging)
+- Samsung Messages (com.samsung.android.messaging)
+- 기본 메시지 앱 (com.android.mms)
+
+### 거래 플랫폼 (2개)
+- 당근마켓 (kr.co.daangn)
+- 네이버 (com.nhn.android.search)
+
+### 기타 (4개)
+- 바이버 (com.viber.voip)
+- 킥 (kik.android)
+- 스카이프 (com.skype.raider)
+
+**총 18개 앱 지원** - 지속적으로 추가 예정
 
 ---
 
@@ -92,12 +126,12 @@ THECHEAT_API_KEY=your_api_key_here
 
 자세한 개발 계획은 [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) 참조
 
-**현재 진행 상황**: Week 1 Day 1 ✅
+**현재 진행 상황**: Week 1 Day 2 ✅
 
 - [x] 프로젝트 초기 설정
 - [x] Clean Architecture 구조 생성
 - [x] 기본 도메인 모델 정의
-- [ ] 접근성 서비스 구현 (Day 2)
+- [x] 접근성 서비스 구현 (Day 2) - 18개 앱 지원
 - [ ] Rule-based 탐지 엔진 (Day 3)
 
 ---

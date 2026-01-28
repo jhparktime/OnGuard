@@ -168,10 +168,24 @@ Resources:      type_description    (ic_warning, layout_overlay)
 ```kotlin
 // ✅ MUST: 모니터링 대상 앱 명시적 제한
 private val targetPackages = setOf(
-    "com.kakao.talk",
-    "org.telegram.messenger",
-    "com.whatsapp",
-    "com.facebook.orca"
+    // 메신저 앱
+    "com.kakao.talk",                     // 카카오톡
+    "org.telegram.messenger",             // 텔레그램
+    "com.whatsapp",                       // 왓츠앱
+    "com.facebook.orca",                  // 페이스북 메신저
+    "com.instagram.android",              // 인스타그램
+
+    // SMS/MMS 앱
+    "com.google.android.apps.messaging",  // Google Messages
+    "com.samsung.android.messaging",      // Samsung Messages
+    "com.android.mms",                    // 기본 메시지
+
+    // 거래 플랫폼
+    "kr.co.daangn",                       // 당근마켓
+
+    // 기타 메신저
+    "jp.naver.line.android",              // 라인
+    "com.discord"                         // 디스코드
 )
 
 // ✅ MUST: 수집 데이터 최소화
