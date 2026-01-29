@@ -1,11 +1,19 @@
 package com.dealguard.detector
 
+import android.util.Log
 import android.util.Patterns
+import com.dealguard.domain.repository.PhishingUrlRepository
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class UrlAnalyzer @Inject constructor() {
+class UrlAnalyzer @Inject constructor(
+    private val phishingUrlRepository: PhishingUrlRepository
+) {
+
+    companion object {
+        private const val TAG = "UrlAnalyzer"
+    }
 
     // 의심스러운 도메인 확장자
     private val suspiciousTlds = setOf(
@@ -43,7 +51,7 @@ class UrlAnalyzer @Inject constructor() {
         val riskScore: Float
     )
 
-    fun analyze(text: String): UrlAnalysisResult {
+    suspend fun analyze(text: String): UrlAnalysisResult {
         val urls = extractUrls(text)
         val suspiciousUrls = mutableListOf<String>()
         val reasons = mutableListOf<String>()
@@ -51,6 +59,18 @@ class UrlAnalyzer @Inject constructor() {
 
         urls.forEach { url ->
             val urlLower = url.lowercase()
+
+            // 0. KISA 피싱사이트 DB 체크 (최우선)
+            try {
+                if (phishingUrlRepository.isPhishingUrl(url)) {
+                    suspiciousUrls.add(url)
+                    riskScore += 0.9f
+                    reasons.add("KISA 피싱사이트 DB 등록 URL")
+                    Log.w(TAG, "KISA DB match found: $url")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "KISA DB check failed", e)
+            }
 
             // 1. 무료/의심 도메인 체크
             if (suspiciousTlds.any { tld -> urlLower.contains(".$tld") }) {
