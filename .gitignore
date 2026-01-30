@@ -64,3 +64,19 @@ obj/
 # Test files
 test.kt
 test.jar
+
+# Kotlin cache
+.kotlin/
+
+# Downloaded Gradle distributions
+gradle-*.zip
+
+# Temporary folders
+gradle-temp/
+temp/
+
+# Windows artifacts
+nul
+
+# Claude Code
+.claude/

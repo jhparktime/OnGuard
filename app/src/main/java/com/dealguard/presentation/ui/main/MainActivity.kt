@@ -76,7 +76,13 @@ fun MainScreen(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 ),
                 actions = {
-                    IconButton(onClick = { /* TODO: Settings */ }) {
+                    // TODO(UI/UX팀): SettingsActivity 구현 필요
+                    // 설정 항목:
+                    // - 알림 설정 (소리, 진동 on/off)
+                    // - 모니터링 대상 앱 선택 (targetPackages 커스터마이징)
+                    // - KISA DB 업데이트 주기 (1일/3일/7일)
+                    // - 민감도 조절 (SCAM_THRESHOLD 0.3~0.7)
+                    IconButton(onClick = { /* SettingsActivity 호출 */ }) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
                     }
                 }
@@ -314,7 +320,7 @@ fun EmptyAlertsCard() {
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Icon(
-                imageVector = Icons.Default.Security,
+                imageVector = Icons.Default.Check,
                 contentDescription = null,
                 modifier = Modifier.size(48.dp),
                 tint = MaterialTheme.colorScheme.primary

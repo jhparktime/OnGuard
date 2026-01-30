@@ -40,7 +40,7 @@ class ScamDetectionAccessibilityService : AccessibilityService() {
 
         // 거래 플랫폼
         "kr.co.daangn",                             // 당근마켓
-        "com.nhn.android.search"                    // 네이버 (채팅)
+        "com.nhn.android.search",                   // 네이버 (채팅)
 
         // 추가 메신저
         "jp.naver.line.android",                    // 라인
@@ -52,15 +52,32 @@ class ScamDetectionAccessibilityService : AccessibilityService() {
         "com.snapchat.android"                      // 스냅챗
     )
 
-    private val serviceScope = CoroutineScope(Dispatchers.Default + Job())
+    private val serviceJob = Job()
+    private val serviceScope = CoroutineScope(Dispatchers.Default + serviceJob)
     private val handler = Handler(Looper.getMainLooper())
     private var debounceJob: Job? = null
     private var lastProcessedText: WeakReference<String>? = null
 
     companion object {
         private const val TAG = "ScamDetectionService"
+
+        // 디바운스 지연: 100ms
+        // - 사용자 타이핑 중 과도한 분석 방지
+        // - 100ms 미만: CPU/배터리 과다 사용
+        // - 200ms 초과: UX 반응성 저하
         private const val DEBOUNCE_DELAY_MS = 100L
+
+        // 최소 텍스트 길이: 10자
+        // - 너무 짧은 텍스트는 스캠 판정 불가
+        // - "안녕하세요"(5자) 같은 일반 인사 필터링
+        // - 스캠 메시지는 보통 20자 이상
         private const val MIN_TEXT_LENGTH = 10
+
+        // 스캠 임계값: 0.5 (50%)
+        // - 오탐(false positive) 최소화와 미탐(false negative) 균형점
+        // - 0.3 이하: 오탐 증가 (일반 메시지도 스캠 판정)
+        // - 0.7 이상: 미탐 증가 (실제 스캠 놓침)
+        // - KeywordMatcher와 연동: CRITICAL 2개 조합(0.8) 또는 CRITICAL+HIGH(0.65)
         private const val SCAM_THRESHOLD = 0.5f
     }
 
@@ -193,6 +210,7 @@ class ScamDetectionAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        serviceJob.cancel()
         debounceJob?.cancel()
         Log.i(TAG, "Accessibility Service Destroyed")
     }

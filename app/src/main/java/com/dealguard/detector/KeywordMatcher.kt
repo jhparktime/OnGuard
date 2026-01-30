@@ -5,14 +5,43 @@ import com.dealguard.domain.model.ScamAnalysis
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * 규칙 기반 키워드 매칭기
+ *
+ * 3단계 가중치 체계로 스캠 키워드를 분석합니다.
+ * 스캠 판정 임계값: 0.5 (50%)
+ *
+ * 사용 예시:
+ * - "급전 필요합니다" -> HIGH 키워드 1개 (0.25) -> 스캠 아님
+ * - "계좌번호 알려주세요" -> CRITICAL 키워드 1개 (0.4) -> 스캠 아님
+ * - "급전 필요, 계좌번호 보내세요" -> CRITICAL(0.4) + HIGH(0.25) = 0.65 -> 스캠!
+ */
 @Singleton
 class KeywordMatcher @Inject constructor() {
 
-    // 키워드 가중치 enum
+    /**
+     * 키워드 가중치 체계
+     *
+     * 가중치 설계 원칙:
+     * - CRITICAL 2개 이상 또는 CRITICAL+HIGH 조합 시 스캠 판정
+     * - 단일 키워드로는 스캠 판정 불가 (오탐 방지)
+     *
+     * CRITICAL (0.4f): 직접적 금전/인증 요구, 기관 사칭
+     *   - 예: "계좌번호 알려주세요", "OTP번호 보내세요"
+     *   - 2개 조합 시 0.8 (스캠 확정)
+     *
+     * HIGH (0.25f): 간접적 금전 관련, 피싱 키워드
+     *   - 예: "급전", "대출", "인증번호"
+     *   - CRITICAL과 조합 시 0.65 (스캠 판정)
+     *
+     * MEDIUM (0.15f): 의심스러운 표현
+     *   - 예: "당첨", "환급", "무료"
+     *   - 단독으로는 스캠 판정 불가, 보조 지표로 활용
+     */
     private enum class KeywordWeight(val weight: Float) {
-        CRITICAL(0.4f),  // 매우 위험
-        HIGH(0.25f),     // 높은 위험
-        MEDIUM(0.15f)    // 중간 위험
+        CRITICAL(0.4f),
+        HIGH(0.25f),
+        MEDIUM(0.15f)
     }
 
     // 가중치별 키워드 맵
