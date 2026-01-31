@@ -106,7 +106,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:layout_marginStart="16dp"
-            android:text="\"먼저 입금해주시면\""
+            android:text="&quot;먼저 입금해주시면&quot;"
             android:textColor="#FFEB3B"
             android:textSize="12sp"
             android:textStyle="italic" />
