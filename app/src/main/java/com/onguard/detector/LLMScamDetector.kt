@@ -7,6 +7,7 @@ import com.onguard.domain.model.ScamAnalysis
 import com.onguard.domain.model.ScamType
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
+import com.google.mediapipe.framework.MediaPipeException
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -114,6 +115,8 @@ class LLMScamDetector @Inject constructor(
                 return@withContext false
             }
 
+            // MediaPipe 옵션 생성
+            Log.d(TAG, "Creating MediaPipe LLM options: path=${modelFile.absolutePath}, maxTokens=$MAX_TOKENS")
             val options = LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(modelFile.absolutePath)
                 .setMaxTokens(MAX_TOKENS)
@@ -121,12 +124,24 @@ class LLMScamDetector @Inject constructor(
                 .setTopK(TOP_K)
                 .build()
 
+            // MediaPipe LLM 인스턴스 생성 (여기서 크래시 가능)
+            Log.d(TAG, "Creating LlmInference instance...")
             llmInference = LlmInference.createFromOptions(context, options)
+            
             isInitialized = true
-            Log.d(TAG, "LLM initialized successfully")
+            Log.i(TAG, "LLM initialized successfully")
             true
+        } catch (e: MediaPipeException) {
+            Log.e(TAG, "MediaPipe exception during LLM initialization", e)
+            Log.e(TAG, "Error message: ${e.message}")
+            Log.e(TAG, "Model path: ${modelFile.absolutePath}")
+            Log.e(TAG, "Model file exists: ${modelFile.exists()}, size: ${modelFile.length()} bytes")
+            false
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize LLM", e)
+            Log.e(TAG, "Exception type: ${e.javaClass.simpleName}")
+            Log.e(TAG, "Exception message: ${e.message}")
+            e.printStackTrace()
             false
         }
     }
