@@ -78,6 +78,12 @@ class LLMScamDetector @Inject constructor(
             Log.d(TAG, "LLM already initialized, skipping")
             return@withContext true
         }
+        
+        // 크래시 방지를 위한 안전장치: 이미 초기화 실패한 경우 재시도 방지
+        if (::llmInference.isInitialized && llmInference == null) {
+            Log.w(TAG, "Previous initialization failed, skipping retry to prevent crash")
+            return@withContext false
+        }
 
         try {
             val modelFile = File(context.filesDir, MODEL_PATH)
