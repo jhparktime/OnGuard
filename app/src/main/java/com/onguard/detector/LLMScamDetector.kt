@@ -72,75 +72,200 @@ class LLMScamDetector @Inject constructor(
      * @return 성공 시 true, 모델 없음/예외 시 false
      */
     suspend fun initialize(): Boolean = withContext(Dispatchers.IO) {
-        if (isInitialized) return@withContext true
+        Log.d(TAG, "=== LLM Initialization Started ===")
+        
+        if (isInitialized) {
+            Log.d(TAG, "LLM already initialized, skipping")
+            return@withContext true
+        }
 
         try {
             val modelFile = File(context.filesDir, MODEL_PATH)
+            Log.d(TAG, "Target model file path: ${modelFile.absolutePath}")
+            Log.d(TAG, "Model file parent exists: ${modelFile.parentFile?.exists()}")
 
             // assets에서 모델 파일 확인 및 복사
             val assetPath = MODEL_PATH
+            Log.d(TAG, "Checking assets for model: $assetPath")
+            
             try {
-                // 기존 파일이 있으면 삭제 (모델 변경 시 재복사 보장)
+                // assets에 파일이 있는지 확인
+                val assetExists = try {
+                    context.assets.open(assetPath).use { true }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Model file not found in assets: $assetPath", e)
+                    false
+                }
+                
+                if (!assetExists) {
+                    Log.e(TAG, "Model file not found in assets: $assetPath")
+                    Log.w(TAG, "LLM detection will be disabled. Please add Gemma model to assets/models/")
+                    return@withContext false
+                }
+                
+                // 기존 파일이 있으면 검증
                 if (modelFile.exists()) {
                     val fileSize = modelFile.length()
-                    Log.d(TAG, "Existing model file found: ${modelFile.absolutePath}, size: $fileSize bytes")
+                    val fileReadable = modelFile.canRead()
+                    Log.d(TAG, "Existing model file found: ${modelFile.absolutePath}")
+                    Log.d(TAG, "  - Size: $fileSize bytes (${fileSize / 1_000_000}MB)")
+                    Log.d(TAG, "  - Readable: $fileReadable")
+                    
                     // 파일 크기가 비정상적으로 작으면 삭제 후 재복사
                     if (fileSize < 100_000_000L) { // 100MB 미만이면 손상된 것으로 간주
-                        Log.w(TAG, "Model file seems corrupted (too small), deleting and re-copying")
-                        modelFile.delete()
+                        Log.w(TAG, "Model file seems corrupted (too small: ${fileSize} bytes), deleting and re-copying")
+                        val deleted = modelFile.delete()
+                        Log.d(TAG, "  - Deleted: $deleted")
+                    } else {
+                        Log.d(TAG, "Existing model file size is valid, skipping copy")
                     }
                 }
                 
                 // assets에서 복사 (없거나 손상된 경우)
                 if (!modelFile.exists()) {
+                    Log.d(TAG, "Copying model from assets to filesDir...")
                     context.assets.open(assetPath).use { input ->
+                        val assetSize = input.available()
+                        Log.d(TAG, "  - Asset size: $assetSize bytes")
+                        
                         modelFile.parentFile?.mkdirs()
+                        val parentCreated = modelFile.parentFile?.exists() ?: false
+                        Log.d(TAG, "  - Parent directory created: $parentCreated")
+                        
                         modelFile.outputStream().use { output ->
-                            input.copyTo(output)
+                            var bytesCopied = 0L
+                            val buffer = ByteArray(8192)
+                            var read: Int
+                            while (input.read(buffer).also { read = it } != -1) {
+                                output.write(buffer, 0, read)
+                                bytesCopied += read
+                                if (bytesCopied % (10 * 1024 * 1024) == 0L) { // 10MB마다 로그
+                                    Log.d(TAG, "  - Copied: ${bytesCopied / 1_000_000}MB")
+                                }
+                            }
+                            Log.d(TAG, "  - Total copied: ${bytesCopied / 1_000_000}MB")
                         }
                     }
+                    
                     val copiedSize = modelFile.length()
-                    Log.d(TAG, "Model copied from assets to: ${modelFile.absolutePath}, size: $copiedSize bytes")
+                    val copiedReadable = modelFile.canRead()
+                    Log.d(TAG, "Model copied successfully")
+                    Log.d(TAG, "  - Final size: $copiedSize bytes (${copiedSize / 1_000_000}MB)")
+                    Log.d(TAG, "  - Readable: $copiedReadable")
                     
                     // 복사 후 크기 검증
                     if (copiedSize < 100_000_000L) {
-                        Log.e(TAG, "Copied model file is too small, likely corrupted")
+                        Log.e(TAG, "Copied model file is too small ($copiedSize bytes), likely corrupted")
                         modelFile.delete()
                         return@withContext false
                     }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error copying model from assets: $assetPath", e)
+                Log.e(TAG, "Exception type: ${e.javaClass.name}")
+                Log.e(TAG, "Exception message: ${e.message}")
+                e.printStackTrace()
                 Log.w(TAG, "LLM detection will be disabled. Please add Gemma model to assets/models/")
                 return@withContext false
             }
 
             // MediaPipe 옵션 생성
-            Log.d(TAG, "Creating MediaPipe LLM options: path=${modelFile.absolutePath}, maxTokens=$MAX_TOKENS")
-            val options = LlmInference.LlmInferenceOptions.builder()
-                .setModelPath(modelFile.absolutePath)
-                .setMaxTokens(MAX_TOKENS)
-                .setTemperature(TEMPERATURE)
-                .setTopK(TOP_K)
-                .build()
+            Log.d(TAG, "=== Creating MediaPipe LLM Options ===")
+            Log.d(TAG, "  - Model path: ${modelFile.absolutePath}")
+            Log.d(TAG, "  - Max tokens: $MAX_TOKENS")
+            Log.d(TAG, "  - Temperature: $TEMPERATURE")
+            Log.d(TAG, "  - Top K: $TOP_K")
+            
+            val options = try {
+                LlmInference.LlmInferenceOptions.builder()
+                    .setModelPath(modelFile.absolutePath)
+                    .setMaxTokens(MAX_TOKENS)
+                    .setTemperature(TEMPERATURE)
+                    .setTopK(TOP_K)
+                    .build()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to build MediaPipe options", e)
+                Log.e(TAG, "Exception type: ${e.javaClass.name}")
+                Log.e(TAG, "Exception message: ${e.message}")
+                e.printStackTrace()
+                return@withContext false
+            }
+            
+            Log.d(TAG, "MediaPipe options created successfully")
 
             // MediaPipe LLM 인스턴스 생성 (여기서 크래시 가능)
-            Log.d(TAG, "Creating LlmInference instance...")
-            llmInference = LlmInference.createFromOptions(context, options)
+            Log.d(TAG, "=== Creating LlmInference Instance ===")
+            Log.d(TAG, "  - Context: ${context.javaClass.simpleName}")
+            Log.d(TAG, "  - Model file exists: ${modelFile.exists()}")
+            Log.d(TAG, "  - Model file readable: ${modelFile.canRead()}")
+            Log.d(TAG, "  - Model file size: ${modelFile.length()} bytes")
+            
+            // 메모리 상태 확인 (가능한 경우)
+            val runtime = Runtime.getRuntime()
+            val totalMemory = runtime.totalMemory()
+            val freeMemory = runtime.freeMemory()
+            val usedMemory = totalMemory - freeMemory
+            Log.d(TAG, "  - Memory: ${usedMemory / 1_000_000}MB used / ${totalMemory / 1_000_000}MB total")
+            
+            llmInference = try {
+                LlmInference.createFromOptions(context, options)
+            } catch (e: MediaPipeException) {
+                Log.e(TAG, "=== MediaPipe Exception ===", e)
+                Log.e(TAG, "MediaPipe error during LlmInference creation")
+                Log.e(TAG, "  - Error message: ${e.message}")
+                Log.e(TAG, "  - Error cause: ${e.cause}")
+                Log.e(TAG, "  - Model path: ${modelFile.absolutePath}")
+                Log.e(TAG, "  - Model file exists: ${modelFile.exists()}")
+                Log.e(TAG, "  - Model file size: ${modelFile.length()} bytes")
+                e.printStackTrace()
+                return@withContext false
+            } catch (e: Exception) {
+                Log.e(TAG, "=== Unexpected Exception ===", e)
+                Log.e(TAG, "Unexpected error during LlmInference creation")
+                Log.e(TAG, "  - Exception type: ${e.javaClass.name}")
+                Log.e(TAG, "  - Exception message: ${e.message}")
+                Log.e(TAG, "  - Exception cause: ${e.cause}")
+                e.printStackTrace()
+                return@withContext false
+            }
+            
+            if (llmInference == null) {
+                Log.e(TAG, "LlmInference instance is null after creation")
+                return@withContext false
+            }
             
             isInitialized = true
-            Log.i(TAG, "LLM initialized successfully")
+            Log.i(TAG, "=== LLM Initialized Successfully ===")
             true
         } catch (e: MediaPipeException) {
-            Log.e(TAG, "MediaPipe exception during LLM initialization", e)
-            Log.e(TAG, "Error message: ${e.message}")
-            Log.e(TAG, "Model path: ${modelFile.absolutePath}")
-            Log.e(TAG, "Model file exists: ${modelFile.exists()}, size: ${modelFile.length()} bytes")
+            Log.e(TAG, "=== MediaPipe Exception (Outer Catch) ===", e)
+            Log.e(TAG, "MediaPipe exception during LLM initialization")
+            Log.e(TAG, "  - Error message: ${e.message}")
+            Log.e(TAG, "  - Error cause: ${e.cause}")
+            e.printStackTrace()
+            false
+        } catch (e: OutOfMemoryError) {
+            Log.e(TAG, "=== Out of Memory Error ===", e)
+            Log.e(TAG, "Not enough memory to initialize LLM")
+            val runtime = Runtime.getRuntime()
+            Log.e(TAG, "  - Total memory: ${runtime.totalMemory() / 1_000_000}MB")
+            Log.e(TAG, "  - Free memory: ${runtime.freeMemory() / 1_000_000}MB")
+            Log.e(TAG, "  - Max memory: ${runtime.maxMemory() / 1_000_000}MB")
+            e.printStackTrace()
             false
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize LLM", e)
-            Log.e(TAG, "Exception type: ${e.javaClass.simpleName}")
-            Log.e(TAG, "Exception message: ${e.message}")
+            Log.e(TAG, "=== General Exception (Outer Catch) ===", e)
+            Log.e(TAG, "Failed to initialize LLM")
+            Log.e(TAG, "  - Exception type: ${e.javaClass.name}")
+            Log.e(TAG, "  - Exception message: ${e.message}")
+            Log.e(TAG, "  - Exception cause: ${e.cause}")
+            e.printStackTrace()
+            false
+        } catch (e: Throwable) {
+            Log.e(TAG, "=== Fatal Error ===", e)
+            Log.e(TAG, "Fatal error during LLM initialization")
+            Log.e(TAG, "  - Error type: ${e.javaClass.name}")
+            Log.e(TAG, "  - Error message: ${e.message}")
             e.printStackTrace()
             false
         }
@@ -161,23 +286,62 @@ class LLMScamDetector @Inject constructor(
      * @return [ScamAnalysis] 분석 결과. 모델 미사용/빈 응답/파싱 실패 시 null
      */
     suspend fun analyze(text: String, context: LlmContext? = null): ScamAnalysis? = withContext(Dispatchers.Default) {
+        Log.d(TAG, "=== LLM Analysis Started ===")
+        Log.d(TAG, "  - Text length: ${text.length} chars")
+        Log.d(TAG, "  - Context provided: ${context != null}")
+        
         if (!isAvailable()) {
-            Log.w(TAG, "LLM not available, skipping analysis")
+            Log.w(TAG, "LLM not available (isInitialized=$isInitialized, llmInference=${llmInference != null}), skipping analysis")
             return@withContext null
         }
 
         try {
+            Log.d(TAG, "Building prompt...")
             val prompt = buildPrompt(text, context)
+            Log.d(TAG, "  - Prompt length: ${prompt.length} chars")
+            Log.v(TAG, "  - Prompt preview: ${prompt.take(200)}...")
+            
+            Log.d(TAG, "Generating LLM response...")
             val response = llmInference?.generateResponse(prompt)
 
             if (response.isNullOrBlank()) {
-                Log.w(TAG, "Empty response from LLM")
+                Log.w(TAG, "Empty or null response from LLM")
+                Log.w(TAG, "  - Response is null: ${response == null}")
+                Log.w(TAG, "  - Response is blank: ${response?.isBlank() ?: true}")
                 return@withContext null
             }
+            
+            Log.d(TAG, "LLM response received: ${response.length} chars")
+            Log.v(TAG, "  - Response preview: ${response.take(200)}...")
 
-            parseResponse(response)
+            Log.d(TAG, "Parsing LLM response...")
+            val result = parseResponse(response)
+            
+            if (result == null) {
+                Log.w(TAG, "Failed to parse LLM response")
+            } else {
+                Log.d(TAG, "=== LLM Analysis Success ===")
+                Log.d(TAG, "  - isScam: ${result.isScam}")
+                Log.d(TAG, "  - confidence: ${result.confidence}")
+                Log.d(TAG, "  - scamType: ${result.scamType}")
+                Log.d(TAG, "  - reasons count: ${result.reasons.size}")
+            }
+            
+            result
         } catch (e: Exception) {
-            Log.e(TAG, "Error during LLM analysis", e)
+            Log.e(TAG, "=== Error during LLM analysis ===", e)
+            Log.e(TAG, "  - Exception type: ${e.javaClass.name}")
+            Log.e(TAG, "  - Exception message: ${e.message}")
+            Log.e(TAG, "  - Exception cause: ${e.cause}")
+            Log.e(TAG, "  - Text length: ${text.length} chars")
+            Log.e(TAG, "  - LLM available: $isAvailable")
+            e.printStackTrace()
+            null
+        } catch (e: Throwable) {
+            Log.e(TAG, "=== Fatal error during LLM analysis ===", e)
+            Log.e(TAG, "  - Error type: ${e.javaClass.name}")
+            Log.e(TAG, "  - Error message: ${e.message}")
+            e.printStackTrace()
             null
         }
     }
@@ -264,18 +428,28 @@ $text
      * @return 파싱 성공 시 [ScamAnalysis], 실패 시 null
      */
     private fun parseResponse(response: String): ScamAnalysis? {
+        Log.d(TAG, "Parsing LLM response...")
         return try {
             // JSON 부분만 추출 (LLM이 추가 텍스트를 생성할 수 있음)
             val jsonStart = response.indexOf('{')
             val jsonEnd = response.lastIndexOf('}')
 
+            Log.d(TAG, "  - JSON start index: $jsonStart")
+            Log.d(TAG, "  - JSON end index: $jsonEnd")
+
             if (jsonStart == -1 || jsonEnd == -1 || jsonEnd <= jsonStart) {
-                Log.w(TAG, "No valid JSON found in response: $response")
+                Log.w(TAG, "No valid JSON found in response")
+                Log.w(TAG, "  - Response length: ${response.length}")
+                Log.w(TAG, "  - Response preview: ${response.take(500)}")
                 return null
             }
 
             val jsonString = response.substring(jsonStart, jsonEnd + 1)
+            Log.d(TAG, "  - Extracted JSON length: ${jsonString.length}")
+            Log.v(TAG, "  - JSON content: $jsonString")
+            
             val llmResult = gson.fromJson(jsonString, LLMResponse::class.java)
+            Log.d(TAG, "  - Parsed LLM result: isScam=${llmResult.isScam}, confidence=${llmResult.confidence}")
 
             ScamAnalysis(
                 isScam = llmResult.isScam,
@@ -288,7 +462,12 @@ $text
                 suspiciousParts = llmResult.suspiciousParts
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse LLM response: $response", e)
+            Log.e(TAG, "=== Failed to parse LLM response ===", e)
+            Log.e(TAG, "  - Exception type: ${e.javaClass.name}")
+            Log.e(TAG, "  - Exception message: ${e.message}")
+            Log.e(TAG, "  - Response length: ${response.length}")
+            Log.e(TAG, "  - Response preview: ${response.take(500)}")
+            e.printStackTrace()
             null
         }
     }
