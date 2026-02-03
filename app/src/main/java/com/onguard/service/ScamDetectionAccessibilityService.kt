@@ -76,6 +76,12 @@ class ScamDetectionAccessibilityService : AccessibilityService() {
     // Key: "앱패키지:정렬된키워드목록", Value: 마지막 알림 시각(ms)
     private val recentAlertCache = mutableMapOf<String, Long>()
 
+    // 스크롤 모드 감지용 변수
+    // - 스크롤 이벤트 발생 시 타임스탬프 기록
+    // - 일정 시간 내에는 "스크롤 모드"로 간주하여 캐시된 알림 스킵
+    @Volatile
+    private var lastScrollTimestamp: Long = 0L
+
     companion object {
         private const val TAG = "ScamDetectionService"
 
@@ -101,17 +107,22 @@ class ScamDetectionAccessibilityService : AccessibilityService() {
 
         // ========== 스크롤 중복 알림 방지 설정 ==========
 
-        // 스크롤 중복 방지용 짧은 윈도우 (10초)
-        // - 10초 이내 같은 키워드 조합 → 스크롤로 간주, 알림 무시
-        // - 10초 이후 같은 키워드 조합 → 새 메시지로 간주, 알림 표시
-        // - 너무 짧으면(3초) 빠른 스크롤 후 새 메시지 놓침
-        // - 너무 길면(60초) 실제 새 스캠 메시지 놓침
-        private const val SCROLL_DUPLICATE_WINDOW_MS = 10_000L
+        // 스크롤 모드 타임아웃 (3초)
+        // - 스크롤 이벤트 후 3초간 "스크롤 모드" 유지
+        // - 스크롤 모드에서는 캐시에 있는 키워드 조합만 스킵
+        // - 3초 후 스크롤 없으면 "새 메시지 모드"로 전환
+        private const val SCROLL_MODE_TIMEOUT_MS = 3_000L
+
+        // 세션 기반 캐시 유지 시간 (1시간)
+        // - 서비스 실행 중 탐지된 키워드 조합을 1시간 동안 캐시
+        // - 스크롤 모드에서 캐시된 키워드 발견 시 스킵 (과거 메시지)
+        // - 1시간 이후 같은 내용은 새 메시지로 간주
+        private const val CACHE_EXPIRY_MS = 3_600_000L  // 1시간
 
         // 캐시 최대 크기 (메모리 관리)
-        // - 50개 초과 시 가장 오래된 항목 제거
-        // - 메모리 사용량: ~50 * (문자열 키 + Long) ≈ 10KB 미만
-        private const val CACHE_MAX_SIZE = 50
+        // - 100개 초과 시 가장 오래된 항목 제거
+        // - 메모리 사용량: ~100 * (문자열 키 + Long) ≈ 20KB 미만
+        private const val CACHE_MAX_SIZE = 100
 
         // ========== 노드 필터링 설정 (False Positive 방지) ==========
 
@@ -143,7 +154,8 @@ class ScamDetectionAccessibilityService : AccessibilityService() {
 
         val info = AccessibilityServiceInfo().apply {
             eventTypes = AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
-                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
+                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED or
+                    AccessibilityEvent.TYPE_VIEW_SCROLLED  // 스크롤 감지용
             feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
             flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
                     AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
@@ -160,10 +172,18 @@ class ScamDetectionAccessibilityService : AccessibilityService() {
 
         // 이벤트 타입 체크
         when (event.eventType) {
+            // 스크롤 이벤트 감지 → 스크롤 모드 진입
+            AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
+                lastScrollTimestamp = System.currentTimeMillis()
+                Log.d(TAG, "Scroll detected - entering scroll mode")
+            }
+
+            // 컨텐츠 변경 이벤트 → 텍스트 분석
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
                 processEvent(event)
             }
+
             else -> return
         }
     }
@@ -368,6 +388,20 @@ class ScamDetectionAccessibilityService : AccessibilityService() {
     // ========== 스크롤 중복 알림 방지 함수 ==========
 
     /**
+     * 현재 스크롤 모드인지 확인
+     *
+     * 스크롤 이벤트 발생 후 SCROLL_MODE_TIMEOUT_MS(3초) 이내이면 스크롤 모드
+     * - 스크롤 모드: 캐시에 있는 키워드 조합은 스킵 (과거 메시지)
+     * - 일반 모드: 새 메시지로 간주하여 정상 탐지
+     *
+     * @return true if in scroll mode
+     */
+    private fun isInScrollMode(): Boolean {
+        val elapsed = System.currentTimeMillis() - lastScrollTimestamp
+        return elapsed < SCROLL_MODE_TIMEOUT_MS
+    }
+
+    /**
      * 캐시 키 생성: 앱 + 탐지된 키워드 조합
      *
      * 전체 텍스트 대신 키워드만 사용하는 이유:
@@ -387,15 +421,22 @@ class ScamDetectionAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * 최근 알림 여부 확인 (스크롤 중복 방지)
+     * 캐시에 해당 키워드 조합이 존재하는지 확인 (만료 체크 포함)
      *
      * @param cacheKey 캐시 키
-     * @return true if same keywords were alerted within SCROLL_DUPLICATE_WINDOW_MS
+     * @return true if cache hit (within CACHE_EXPIRY_MS)
      */
-    private fun isRecentlyAlerted(cacheKey: String): Boolean {
+    private fun isCached(cacheKey: String): Boolean {
         val lastAlertTime = recentAlertCache[cacheKey] ?: return false
         val elapsed = System.currentTimeMillis() - lastAlertTime
-        return elapsed < SCROLL_DUPLICATE_WINDOW_MS
+
+        // 만료된 캐시는 삭제 후 false 반환
+        if (elapsed > CACHE_EXPIRY_MS) {
+            recentAlertCache.remove(cacheKey)
+            return false
+        }
+
+        return true
     }
 
     /**
@@ -406,9 +447,9 @@ class ScamDetectionAccessibilityService : AccessibilityService() {
     private fun registerAlert(cacheKey: String) {
         val now = System.currentTimeMillis()
 
-        // 오래된 캐시 정리 (SCROLL_DUPLICATE_WINDOW_MS 이상 지난 항목)
+        // 오래된 캐시 정리 (CACHE_EXPIRY_MS 이상 지난 항목)
         recentAlertCache.entries.removeIf { (_, time) ->
-            now - time > SCROLL_DUPLICATE_WINDOW_MS
+            now - time > CACHE_EXPIRY_MS
         }
 
         // 캐시 크기 제한 (가장 오래된 항목 제거)
@@ -435,15 +476,28 @@ class ScamDetectionAccessibilityService : AccessibilityService() {
                         sourceApp
                     )
 
-                    // 2. 스크롤 중복 체크 (10초 이내 같은 키워드면 무시)
-                    if (isRecentlyAlerted(cacheKey)) {
-                        Log.d(TAG, "Skipping duplicate alert (scroll detected): $cacheKey")
+                    // 2. 스크롤 모드 및 캐시 상태 확인
+                    val inScrollMode = isInScrollMode()
+                    val cached = isCached(cacheKey)
+
+                    Log.d(TAG, "Scroll mode: $inScrollMode, Cached: $cached, Key: $cacheKey")
+
+                    // 3. 스크롤 중 + 캐시 히트 → 과거 메시지로 간주, 스킵
+                    if (inScrollMode && cached) {
+                        Log.d(TAG, "Skipping: scroll mode + cached (past message)")
                         return@launch
                     }
 
-                    // 3. 캐시에 등록 후 경고 표시
+                    // 4. 스크롤 중이 아님 → 새 메시지로 간주, 항상 탐지
+                    // 5. 스크롤 중 + 캐시 미스 → 새로운 스캠 유형, 탐지
                     registerAlert(cacheKey)
-                    Log.i(TAG, "New scam alert registered: $cacheKey")
+
+                    if (inScrollMode && !cached) {
+                        Log.i(TAG, "New scam type during scroll: $cacheKey")
+                    } else {
+                        Log.i(TAG, "New message scam alert: $cacheKey")
+                    }
+
                     showScamWarning(analysis, sourceApp)
                 }
 
