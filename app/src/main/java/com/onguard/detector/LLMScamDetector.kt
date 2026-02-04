@@ -7,8 +7,10 @@ import com.onguard.domain.model.ScamAnalysis
 import com.onguard.domain.model.ScamType
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
-import com.google.mediapipe.framework.MediaPipeException
-import com.google.mediapipe.tasks.genai.llminference.LlmInference
+import ai.onnxruntime.OrtEnvironment
+import ai.onnxruntime.OrtSession
+import ai.onnxruntime.NodeInfo
+import ai.onnxruntime.TensorInfo
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -19,7 +21,7 @@ import javax.inject.Singleton
 /**
  * LLM 기반 스캠 탐지기.
  *
- * MediaPipe LLM Inference API와 Gemma 3 270M(양자화 .task) 모델을 사용하여
+ * ONNX Runtime와 SmolLM2 계열 ONNX 모델을 사용하여
  * 채팅 메시지를 분석하고, 스캠 여부·신뢰도·경고 메시지·의심 문구를 생성한다.
  * 모델 파일이 없거나 초기화 실패 시 [analyze]는 null을 반환하며, Rule-based만 사용된다.
  *
@@ -31,14 +33,9 @@ class LLMScamDetector @Inject constructor(
 ) {
     companion object {
         private const val TAG = "LLMScamDetector"
-        /** assets 내 모델 상대 경로 (MediaPipe .task 형식, 모바일용) */
-        private const val MODEL_PATH = "models/gemma3-270m-it-q8.task"
-        /** 저사양 기기(S10e 등) 메모리 절감: 출력 토큰 상한 축소 → KV 캐시 감소 */
-        private const val MAX_TOKENS = 128
-        private const val TEMPERATURE = 0.7f
-        /** 샘플링 후보 수 축소 → 메모리·연산 절감 */
-        private const val TOP_K = 32
-        /** 저사양 기기: LLM 입력 길이 상한 (토큰/메모리 절감) */
+        /** assets 내 ONNX 모델 상대 경로 (경량 LLM) */
+        private const val MODEL_PATH = "models/model_q4f16.onnx"
+        /** LLM 입력 길이 상한 (문자 수 기준, 토큰/메모리 절감) */
         private const val MAX_INPUT_CHARS = 1500
     }
 
@@ -63,7 +60,9 @@ class LLMScamDetector @Inject constructor(
         val urlReasons: List<String> = emptyList()
     )
 
-    private var llmInference: LlmInference? = null
+    // ONNX Runtime 환경 및 세션
+    private var ortEnv: OrtEnvironment? = null
+    private var ortSession: OrtSession? = null
     private val gson = Gson()
     private var isInitialized = false
     /** 초기화를 한 번 시도했고 실패한 경우 true (재시도 방지) */
@@ -72,7 +71,7 @@ class LLMScamDetector @Inject constructor(
     /**
      * LLM 모델을 초기화한다.
      *
-     * assets에서 [MODEL_PATH]로 모델을 복사한 뒤 MediaPipe로 로드한다.
+     * assets에서 [MODEL_PATH]로 모델을 복사한 뒤 ONNX Runtime으로 로드한다.
      * 이미 초기화된 경우 즉시 true를 반환한다.
      *
      * @return 성공 시 true, 모델 없음/예외 시 false
@@ -84,11 +83,6 @@ class LLMScamDetector @Inject constructor(
             Log.d(TAG, "LLM already initialized, skipping")
             return@withContext true
         }
-        if (initializationAttempted) {
-            Log.w(TAG, "Previous initialization failed, skipping retry to prevent crash")
-            return@withContext false
-        }
-
         try {
             val modelFile = File(context.filesDir, MODEL_PATH)
             Log.d(TAG, "Target model file path: ${modelFile.absolutePath}")
@@ -108,8 +102,8 @@ class LLMScamDetector @Inject constructor(
                 }
                 
                 if (!assetExists) {
-                    Log.e(TAG, "Model file not found in assets: $assetPath")
-                    Log.w(TAG, "LLM detection will be disabled. Please add Gemma model to assets/models/")
+                    Log.e(TAG, "ONNX model file not found in assets: $assetPath")
+                    Log.w(TAG, "LLM detection will be disabled. Please add ONNX model to assets/models/")
                     return@withContext false
                 }
                 
@@ -117,17 +111,17 @@ class LLMScamDetector @Inject constructor(
                 if (modelFile.exists()) {
                     val fileSize = modelFile.length()
                     val fileReadable = modelFile.canRead()
-                    Log.d(TAG, "Existing model file found: ${modelFile.absolutePath}")
+                    Log.d(TAG, "Existing ONNX model file found: ${modelFile.absolutePath}")
                     Log.d(TAG, "  - Size: $fileSize bytes (${fileSize / 1_000_000}MB)")
                     Log.d(TAG, "  - Readable: $fileReadable")
                     
-                    // 파일 크기가 비정상적으로 작으면 삭제 후 재복사
-                    if (fileSize < 100_000_000L) { // 100MB 미만이면 손상된 것으로 간주
-                        Log.w(TAG, "Model file seems corrupted (too small: ${fileSize} bytes), deleting and re-copying")
+                    // 파일 크기가 비정상적으로 작으면 삭제 후 재복사 (경량 모델 기준 50MB 미만은 이상)
+                    if (fileSize < 50_000_000L) {
+                        Log.w(TAG, "ONNX model file seems corrupted (too small: ${fileSize} bytes), deleting and re-copying")
                         val deleted = modelFile.delete()
                         Log.d(TAG, "  - Deleted: $deleted")
                     } else {
-                        Log.d(TAG, "Existing model file size is valid, skipping copy")
+                        Log.d(TAG, "Existing ONNX model file size is valid, skipping copy")
                     }
                 }
                 
@@ -159,109 +153,85 @@ class LLMScamDetector @Inject constructor(
                     
                     val copiedSize = modelFile.length()
                     val copiedReadable = modelFile.canRead()
-                    Log.d(TAG, "Model copied successfully")
+                    Log.d(TAG, "ONNX model copied successfully")
                     Log.d(TAG, "  - Final size: $copiedSize bytes (${copiedSize / 1_000_000}MB)")
                     Log.d(TAG, "  - Readable: $copiedReadable")
                     
                     // 복사 후 크기 검증
-                    if (copiedSize < 100_000_000L) {
-                        Log.e(TAG, "Copied model file is too small ($copiedSize bytes), likely corrupted")
+                    if (copiedSize < 50_000_000L) {
+                        Log.e(TAG, "Copied ONNX model file is too small ($copiedSize bytes), likely corrupted")
                         modelFile.delete()
                         return@withContext false
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error copying model from assets: $assetPath", e)
+                Log.e(TAG, "Error copying ONNX model from assets: $assetPath", e)
                 Log.e(TAG, "Exception type: ${e.javaClass.name}")
                 Log.e(TAG, "Exception message: ${e.message}")
                 e.printStackTrace()
-                Log.w(TAG, "LLM detection will be disabled. Please add Gemma model to assets/models/")
+                Log.w(TAG, "LLM detection will be disabled. Please add ONNX model to assets/models/")
                 return@withContext false
             }
 
-            // MediaPipe 옵션 생성
-            Log.d(TAG, "=== Creating MediaPipe LLM Options ===")
+            // ONNX Runtime 세션 생성
+            Log.d(TAG, "=== Creating ONNX Runtime Session ===")
             Log.d(TAG, "  - Model path: ${modelFile.absolutePath}")
-            Log.d(TAG, "  - Max tokens: $MAX_TOKENS")
-            Log.d(TAG, "  - Temperature: $TEMPERATURE")
-            Log.d(TAG, "  - Top K: $TOP_K")
-            
-            val options = try {
-                LlmInference.LlmInferenceOptions.builder()
-                    .setModelPath(modelFile.absolutePath)
-                    .setMaxTokens(MAX_TOKENS)
-                    .setTemperature(TEMPERATURE)
-                    .setTopK(TOP_K)
-                    .build()
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to build MediaPipe options", e)
-                Log.e(TAG, "Exception type: ${e.javaClass.name}")
-                Log.e(TAG, "Exception message: ${e.message}")
-                e.printStackTrace()
-                return@withContext false
-            }
-            
-            Log.d(TAG, "MediaPipe options created successfully")
-
-            // LLM 로드 직전 메모리 확보 (저사양 기기 대응)
-            System.gc()
-            // 한 번 실패한 뒤 재시도 방지 (크래시 루프 방지)
-            initializationAttempted = true
-
-            // MediaPipe LLM 인스턴스 생성 (여기서 크래시 가능)
-            Log.d(TAG, "=== Creating LlmInference Instance ===")
-            Log.d(TAG, "  - Context: ${context.javaClass.simpleName}")
             Log.d(TAG, "  - Model file exists: ${modelFile.exists()}")
             Log.d(TAG, "  - Model file readable: ${modelFile.canRead()}")
             Log.d(TAG, "  - Model file size: ${modelFile.length()} bytes")
             
-            // 메모리 상태 확인 (가능한 경우)
-            val runtime = Runtime.getRuntime()
-            val totalMemory = runtime.totalMemory()
-            val freeMemory = runtime.freeMemory()
-            val usedMemory = totalMemory - freeMemory
-            Log.d(TAG, "  - Memory: ${usedMemory / 1_000_000}MB used / ${totalMemory / 1_000_000}MB total")
-            
-            llmInference = try {
-                LlmInference.createFromOptions(context, options)
-            } catch (e: MediaPipeException) {
-                Log.e(TAG, "=== MediaPipe Exception ===", e)
-                Log.e(TAG, "MediaPipe error during LlmInference creation")
-                Log.e(TAG, "  - Error message: ${e.message}")
-                Log.e(TAG, "  - Error cause: ${e.cause}")
-                Log.e(TAG, "  - Model path: ${modelFile.absolutePath}")
-                Log.e(TAG, "  - Model file exists: ${modelFile.exists()}")
-                Log.e(TAG, "  - Model file size: ${modelFile.length()} bytes")
+            // LLM 로드 직전 메모리 확보 (저사양 기기 대응)
+            System.gc()
+
+            try {
+                val env = OrtEnvironment.getEnvironment()
+                val sessionOptions = OrtSession.SessionOptions()
+                val session = env.createSession(modelFile.absolutePath, sessionOptions)
+
+                // 입출력 메타데이터 로깅 (모델 구조 파악용)
+                Log.d(TAG, "=== ONNX Model IO Info ===")
+                session.inputNames.forEach { name ->
+                    val info: NodeInfo? = session.inputInfo[name]
+                    val tensorInfo = info?.info as? TensorInfo
+                    Log.d(
+                        TAG,
+                        "  - Input: $name, type=${tensorInfo?.type}, shape=${tensorInfo?.shape?.joinToString()}"
+                    )
+                }
+                session.outputNames.forEach { name ->
+                    val info: NodeInfo? = session.outputInfo[name]
+                    val tensorInfo = info?.info as? TensorInfo
+                    Log.d(
+                        TAG,
+                        "  - Output: $name, type=${tensorInfo?.type}, shape=${tensorInfo?.shape?.joinToString()}"
+                    )
+                }
+
+                ortEnv = env
+                ortSession = session
+                isInitialized = true
+                initializationAttempted = true
+
+                Log.i(TAG, "=== ONNX LLM Initialized Successfully ===")
+                true
+            } catch (e: OutOfMemoryError) {
+                Log.e(TAG, "=== Out of Memory during ONNX LLM initialization ===", e)
+                val runtime = Runtime.getRuntime()
+                Log.e(TAG, "  - Total memory: ${runtime.totalMemory() / 1_000_000}MB")
+                Log.e(TAG, "  - Free memory: ${runtime.freeMemory() / 1_000_000}MB")
+                Log.e(TAG, "  - Max memory: ${runtime.maxMemory() / 1_000_000}MB")
                 e.printStackTrace()
-                return@withContext false
+                false
             } catch (e: Exception) {
-                Log.e(TAG, "=== Unexpected Exception ===", e)
-                Log.e(TAG, "Unexpected error during LlmInference creation")
+                Log.e(TAG, "=== Exception during ONNX LLM initialization ===", e)
                 Log.e(TAG, "  - Exception type: ${e.javaClass.name}")
                 Log.e(TAG, "  - Exception message: ${e.message}")
-                Log.e(TAG, "  - Exception cause: ${e.cause}")
                 e.printStackTrace()
-                return@withContext false
+                false
             }
-            
-            if (llmInference == null) {
-                Log.e(TAG, "LlmInference instance is null after creation")
-                return@withContext false
-            }
-            
-            isInitialized = true
-            Log.i(TAG, "=== LLM Initialized Successfully ===")
-            true
-        } catch (e: MediaPipeException) {
-            Log.e(TAG, "=== MediaPipe Exception (Outer Catch) ===", e)
-            Log.e(TAG, "MediaPipe exception during LLM initialization")
-            Log.e(TAG, "  - Error message: ${e.message}")
-            Log.e(TAG, "  - Error cause: ${e.cause}")
-            e.printStackTrace()
-            false
         } catch (e: OutOfMemoryError) {
-            Log.e(TAG, "=== Out of Memory Error ===", e)
-            Log.e(TAG, "Not enough memory to initialize LLM")
+            Log.e(TAG, "=== Out of Memory Error (Outer) ===", e)
+            Log.e(TAG, "Not enough memory to initialize ONNX LLM")
             val runtime = Runtime.getRuntime()
             Log.e(TAG, "  - Total memory: ${runtime.totalMemory() / 1_000_000}MB")
             Log.e(TAG, "  - Free memory: ${runtime.freeMemory() / 1_000_000}MB")
@@ -270,7 +240,7 @@ class LLMScamDetector @Inject constructor(
             false
         } catch (e: Exception) {
             Log.e(TAG, "=== General Exception (Outer Catch) ===", e)
-            Log.e(TAG, "Failed to initialize LLM")
+            Log.e(TAG, "Failed to initialize ONNX LLM")
             Log.e(TAG, "  - Exception type: ${e.javaClass.name}")
             Log.e(TAG, "  - Exception message: ${e.message}")
             Log.e(TAG, "  - Exception cause: ${e.cause}")
@@ -291,7 +261,7 @@ class LLMScamDetector @Inject constructor(
      *
      * @return 초기화 완료 및 인스턴스 존재 시 true
      */
-    fun isAvailable(): Boolean = isInitialized && llmInference != null
+    fun isAvailable(): Boolean = isInitialized && ortSession != null
 
     /**
      * 주어진 텍스트를 LLM으로 분석하여 스캠 여부와 상세 결과를 반환한다.
@@ -310,7 +280,7 @@ class LLMScamDetector @Inject constructor(
         Log.d(TAG, "  - Context provided: ${context != null}")
         
         if (!isAvailable()) {
-            Log.w(TAG, "LLM not available (isInitialized=$isInitialized, llmInference=${llmInference != null}), skipping analysis")
+            Log.w(TAG, "LLM not available (isInitialized=$isInitialized, ortSession=${ortSession != null}), skipping analysis")
             return@withContext null
         }
 
@@ -320,21 +290,27 @@ class LLMScamDetector @Inject constructor(
             Log.d(TAG, "  - Prompt length: ${prompt.length} chars")
             Log.v(TAG, "  - Prompt preview: ${prompt.take(200)}...")
             
-            Log.d(TAG, "Generating LLM response...")
-            val response = llmInference?.generateResponse(prompt)
+            Log.d(TAG, "Generating LLM response via ONNX Runtime...")
 
-            if (response.isNullOrBlank()) {
-                Log.w(TAG, "Empty or null response from LLM")
-                Log.w(TAG, "  - Response is null: ${response == null}")
-                Log.w(TAG, "  - Response is blank: ${response?.isBlank() ?: true}")
-                return@withContext null
-            }
-            
-            Log.d(TAG, "LLM response received: ${response.length} chars")
-            Log.v(TAG, "  - Response preview: ${response.take(200)}...")
+            // TODO: SmolLM2 ONNX 모델의 입력/출력 시그니처에 맞게
+            // 토크나이저 및 디코딩 루프를 구현해야 한다.
+            // 현재는 안전을 위해 실제 ONNX 호출은 생략하고, Rule-only로 폴백한다.
 
-            Log.d(TAG, "Parsing LLM response...")
-            val result = parseResponse(response)
+            Log.w(TAG, "ONNX LLM inference is not yet implemented. Falling back to rule-based result.")
+            return@withContext null
+
+            // 예시: 나중에 구현할 때는 대략 아래 흐름이 될 것임
+            // val env = ortEnv ?: return@withContext null
+            // val session = ortSession ?: return@withContext null
+            // val inputs: Map<String, OnnxTensor> = ...
+            // val results = session.run(inputs)
+            // val rawOutput = ...
+            // val response = decodeToText(rawOutput)
+            //
+            // Log.d(TAG, "LLM response received: ${response.length} chars")
+            // Log.v(TAG, "  - Response preview: ${response.take(200)}...")
+            //
+            // val result = parseResponse(response)
             
             if (result == null) {
                 Log.w(TAG, "Failed to parse LLM response")
@@ -520,8 +496,14 @@ $text
      * 앱 종료 또는 탐지기 교체 시 호출 권장.
      */
     fun close() {
-        llmInference?.close()
-        llmInference = null
+        try {
+            ortSession?.close()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error while closing ONNX session", e)
+        }
+        ortSession = null
+        // OrtEnvironment는 전역 singleton이라 명시적으로 닫지 않고 null만 클리어
+        ortEnv = null
         isInitialized = false
         initializationAttempted = false
     }

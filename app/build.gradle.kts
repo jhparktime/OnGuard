@@ -126,15 +126,13 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
-    // TensorFlow Lite
+    // TensorFlow Lite (기타 모델용으로 남겨둠)
     implementation("org.tensorflow:tensorflow-lite:2.14.0")
     implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
     implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
 
-    // MediaPipe LLM Inference API (Gemma 지원)
-    // Note: Version 0.10.14 may show 16KB page size warnings
-    // Check for updates: https://github.com/google-ai-edge/mediapipe
-    implementation("com.google.mediapipe:tasks-genai:0.10.14")
+    // ONNX Runtime (SmolLM2 ONNX용)
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.23.2")
 
     // Gson
     implementation("com.google.code.gson:gson:2.10.1")
