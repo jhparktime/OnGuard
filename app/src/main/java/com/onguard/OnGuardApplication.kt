@@ -59,7 +59,7 @@ class OnGuardApplication : Application(), Configuration.Provider {
      * LLM 모델을 백그라운드에서 초기화한다.
      *
      * 앱 시작 시 한 번 호출되며, 첫 스캠 탐지 시 지연을 줄이기 위해
-     * 미리 Gemma 모델을 로드한다. 실패 시 Rule-based 탐지만 사용된다.
+     * 미리 LLM(Qwen GGUF) 모델을 로드한다. 실패 시 Rule-based 탐지만 사용된다.
      * 
      * 크래시 방지: 네이티브 크래시가 발생해도 앱이 종료되지 않도록
      * SupervisorJob과 별도 코루틴으로 격리한다.

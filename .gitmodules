@@ -1,3 +1,0 @@
-[submodule "app/java-llama.cpp"]
-	path = app/java-llama.cpp
-	url = https://github.com/kherud/java-llama.cpp

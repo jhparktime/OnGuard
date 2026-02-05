@@ -1,6 +1,7 @@
 package com.onguard.di
 
 import android.content.Context
+import com.onguard.llm.LlamaManager
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -16,5 +17,11 @@ object AppModule {
     @Singleton
     fun provideApplicationContext(@ApplicationContext context: Context): Context {
         return context
+    }
+
+    @Provides
+    @Singleton
+    fun provideLlamaManager(@ApplicationContext context: Context): LlamaManager {
+        return LlamaManager(context)
     }
 }

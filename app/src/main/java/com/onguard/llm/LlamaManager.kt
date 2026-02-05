@@ -91,19 +91,19 @@ class LlamaManager(private val context: Context) {
     /**
      * Qwen 2.5 ChatML 포맷으로 프롬프트를 구성한다.
      *
+     * 사용자 입력에는 [Rule 1차 분석 요약] + [메시지] 형태로 전달되며,
+     * 응답은 반드시 아래 JSON만 출력하도록 지시한다.
+     *
      * 포맷:
-     * <|im_start|>system
-     * {시스템명령}
-     * <|im_end|>
-     * <|im_start|>user
-     * {사용자입력}
-     * <|im_end|>
+     * <|im_start|>system ... <|im_end|>
+     * <|im_start|>user {입력} <|im_end|>
      * <|im_start|>assistant
      */
     private fun buildQwenPrompt(userInput: String): String {
         val systemInstruction = """
-            너는 금융 사기 탐지 전문가 'On-Guard'야. 
-            입력된 텍스트가 피싱인지 분석해서 '위험도'와 '이유'를 짧게 한국어로 답변해.
+            너는 사기 탐지 전문가야. 사용자가 보내는 메시지(및 선택적 1차 분석 요약)를 보고, 반드시 아래 JSON 형식으로만 답변해. 다른 텍스트는 출력하지 마.
+            JSON 형식:
+            {"isScam": true 또는 false, "confidence": 0.0~1.0, "scamType": "투자사기" 또는 "중고거래사기" 또는 "피싱" 또는 "정상", "warningMessage": "사용자에게 보여줄 경고 메시지 (한국어, 2문장 이내)", "reasons": ["위험 요소 1", "위험 요소 2"], "suspiciousParts": ["의심되는 문구 인용"]}
         """.trimIndent()
 
         return buildString {

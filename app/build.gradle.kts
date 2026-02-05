@@ -147,9 +147,6 @@ dependencies {
     implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
     implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
 
-    // ONNX Runtime (기존 코드 유지 - 이후 llama.cpp 완전 이행 시 제거 가능)
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.23.2")
-
     // Gson
     implementation("com.google.code.gson:gson:2.10.1")
 

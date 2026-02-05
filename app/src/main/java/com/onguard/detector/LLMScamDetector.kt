@@ -1,47 +1,36 @@
 package com.onguard.detector
 
-import android.app.ActivityManager
 import android.content.Context
-import android.os.Build
 import android.util.Log
 import com.onguard.domain.model.DetectionMethod
 import com.onguard.domain.model.ScamAnalysis
 import com.onguard.domain.model.ScamType
+import com.onguard.llm.LlamaManager
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
-import ai.onnxruntime.OrtEnvironment
-import ai.onnxruntime.OrtSession
-import ai.onnxruntime.NodeInfo
-import ai.onnxruntime.OnnxJavaType // [수정] Float16 명시를 위해 추가
-import ai.onnxruntime.OnnxTensor
-import ai.onnxruntime.TensorInfo
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.nio.ShortBuffer
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
  * LLM 기반 스캠 탐지기.
  *
- * ONNX Runtime와 SmolLM2 계열 ONNX 모델을 사용하여
- * 채팅 메시지를 분석하고, 스캠 여부·신뢰도·경고 메시지·의심 문구를 생성한다.
+ * llama.cpp + Qwen([LlamaManager]) GGUF 모델로 채팅 메시지를 분석하여
+ * 스캠 여부·신뢰도·경고 메시지·의심 문구를 생성한다.
  * 모델 파일이 없거나 초기화 실패 시 [analyze]는 null을 반환하며, Rule-based만 사용된다.
  *
  * @param context [ApplicationContext] 앱 컨텍스트 (assets/filesDir 접근용)
+ * @param llamaManager llama.cpp + Qwen GGUF 모델 매니저
  */
 @Singleton
 class LLMScamDetector @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val llamaManager: LlamaManager
 ) {
     companion object {
         private const val TAG = "LLMScamDetector"
-        /** assets 내 ONNX 모델 상대 경로 (경량 LLM) */
-        private const val MODEL_PATH = "models/model_q4_int8.onnx"
         /** LLM 입력 길이 상한 (문자 수 기준, 토큰/메모리 절감) */
         private const val MAX_INPUT_CHARS = 1500
     }
@@ -67,236 +56,38 @@ class LLMScamDetector @Inject constructor(
         val urlReasons: List<String> = emptyList()
     )
 
-    // ONNX Runtime 환경 및 세션
-    private var ortEnv: OrtEnvironment? = null
-    private var ortSession: OrtSession? = null
     private val gson = Gson()
     private var isInitialized = false
-    /** 초기화를 한 번 시도했고 실패한 경우 true (재시도 방지) */
     private var initializationAttempted = false
 
     /**
      * LLM 모델을 초기화한다.
      *
-     * assets에서 [MODEL_PATH]로 모델을 복사한 뒤 ONNX Runtime으로 로드한다.
+     * LlamaManager(llama.cpp + Qwen GGUF)를 로드한다.
      * 이미 초기화된 경우 즉시 true를 반환한다.
      *
      * @return 성공 시 true, 모델 없음/예외 시 false
      */
     suspend fun initialize(): Boolean = withContext(Dispatchers.IO) {
-        Log.d(TAG, "=== LLM Initialization Started ===")
+        Log.d(TAG, "=== LLM Initialization Started (llama.cpp + Qwen) ===")
 
         if (isInitialized) {
             Log.d(TAG, "LLM already initialized, skipping")
             return@withContext true
         }
+
         try {
-            val modelFile = File(context.filesDir, MODEL_PATH)
-            Log.d(TAG, "Target model file path: ${modelFile.absolutePath}")
-            Log.d(TAG, "Model file parent exists: ${modelFile.parentFile?.exists()}")
-
-            // 디바이스·메모리 정보 로깅 및 저사양 기기 가드
-            // [수정] Runtime.maxMemory()는 앱 힙 한도이므로 기기 스펙 확인엔 부적합.
-            // ActivityManager를 통해 실제 기기 RAM 용량을 확인하도록 수정함.
-            val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-            val memInfo = ActivityManager.MemoryInfo()
-            activityManager?.getMemoryInfo(memInfo)
-
-            val totalRamMb = memInfo.totalMem / (1024 * 1024) // 전체 RAM (MB)
-            val memoryClassMb = activityManager?.memoryClass
-            val largeMemoryClassMb = activityManager?.largeMemoryClass
-
-            val modelName = Build.MODEL ?: "unknown"
-            val manufacturer = Build.MANUFACTURER ?: "unknown"
-
-            Log.d(TAG, "Device info for LLM init:")
-            Log.d(TAG, "  - Manufacturer: $manufacturer")
-            Log.d(TAG, "  - Model: $modelName")
-            Log.d(TAG, "  - Total RAM: ${totalRamMb}MB") // 실제 램 용량
-            Log.d(TAG, "  - App Heap Limit: ${memoryClassMb ?: -1}MB (Large: ${largeMemoryClassMb ?: -1}MB)")
-
-            // 휴대폰 전체 메모리(RAM)를 기준으로 판단.
-            // 3GB(3000MB) 미만인 경우 LLM 구동이 어려우므로 건너뜀.
-            // 또한 일반 heap(memoryClass) < 256MB 인 경우도 안전을 위해 건너뜀.
-            val isLowRamDevice = totalRamMb < 3000
-            val isVerySmallHeap = (memoryClassMb != null && memoryClassMb < 256)
-
-            if (isLowRamDevice || isVerySmallHeap) {
-                Log.w(TAG, "Device capability too low for ONNX LLM (RAM=${totalRamMb}MB, Heap=${memoryClassMb}MB). Skipping LLM initialization and using rule-based detection only.")
-                return@withContext false
-            }
-
-            // assets에서 모델 파일 확인 및 복사
-            val assetPath = MODEL_PATH
-            Log.d(TAG, "Checking assets for model: $assetPath")
-
-            try {
-                // assets에 파일이 있는지 확인
-                val assetExists = try {
-                    context.assets.open(assetPath).use { true }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Model file not found in assets: $assetPath", e)
-                    false
-                }
-
-                if (!assetExists) {
-                    Log.e(TAG, "ONNX model file not found in assets: $assetPath")
-                    Log.w(TAG, "LLM detection will be disabled. Please add ONNX model to assets/models/")
-                    return@withContext false
-                }
-
-                // 기존 파일이 있으면 검증
-                if (modelFile.exists()) {
-                    val fileSize = modelFile.length()
-                    val fileReadable = modelFile.canRead()
-                    Log.d(TAG, "Existing ONNX model file found: ${modelFile.absolutePath}")
-                    Log.d(TAG, "  - Size: $fileSize bytes (${fileSize / 1_000_000}MB)")
-                    Log.d(TAG, "  - Readable: $fileReadable")
-
-                    // 파일 크기가 비정상적으로 작으면 삭제 후 재복사 (경량 모델 기준 50MB 미만은 이상)
-                    if (fileSize < 50_000_000L) {
-                        Log.w(TAG, "ONNX model file seems corrupted (too small: ${fileSize} bytes), deleting and re-copying")
-                        val deleted = modelFile.delete()
-                        Log.d(TAG, "  - Deleted: $deleted")
-                    } else {
-                        Log.d(TAG, "Existing ONNX model file size is valid, skipping copy")
-                    }
-                }
-
-                // assets에서 복사 (없거나 손상된 경우)
-                if (!modelFile.exists()) {
-                    Log.d(TAG, "Copying model from assets to filesDir...")
-                    context.assets.open(assetPath).use { input ->
-                        val assetSize = input.available()
-                        Log.d(TAG, "  - Asset size: $assetSize bytes")
-
-                        modelFile.parentFile?.mkdirs()
-                        val parentCreated = modelFile.parentFile?.exists() ?: false
-                        Log.d(TAG, "  - Parent directory created: $parentCreated")
-
-                        modelFile.outputStream().use { output ->
-                            var bytesCopied = 0L
-                            val buffer = ByteArray(8192)
-                            var read: Int
-                            while (input.read(buffer).also { read = it } != -1) {
-                                output.write(buffer, 0, read)
-                                bytesCopied += read
-                                if (bytesCopied % (10 * 1024 * 1024) == 0L) { // 10MB마다 로그
-                                    Log.d(TAG, "  - Copied: ${bytesCopied / 1_000_000}MB")
-                                }
-                            }
-                            Log.d(TAG, "  - Total copied: ${bytesCopied / 1_000_000}MB")
-                        }
-                    }
-
-                    val copiedSize = modelFile.length()
-                    val copiedReadable = modelFile.canRead()
-                    Log.d(TAG, "ONNX model copied successfully")
-                    Log.d(TAG, "  - Final size: $copiedSize bytes (${copiedSize / 1_000_000}MB)")
-                    Log.d(TAG, "  - Readable: $copiedReadable")
-
-                    // 복사 후 크기 검증
-                    if (copiedSize < 50_000_000L) {
-                        Log.e(TAG, "Copied ONNX model file is too small ($copiedSize bytes), likely corrupted")
-                        modelFile.delete()
-                        return@withContext false
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error copying ONNX model from assets: $assetPath", e)
-                Log.e(TAG, "Exception type: ${e.javaClass.name}")
-                Log.e(TAG, "Exception message: ${e.message}")
-                e.printStackTrace()
-                Log.w(TAG, "LLM detection will be disabled. Please add ONNX model to assets/models/")
-                return@withContext false
-            }
-
-            // ONNX Runtime 세션 생성
-            Log.d(TAG, "=== Creating ONNX Runtime Session ===")
-            Log.d(TAG, "  - Model path: ${modelFile.absolutePath}")
-            Log.d(TAG, "  - Model file exists: ${modelFile.exists()}")
-            Log.d(TAG, "  - Model file readable: ${modelFile.canRead()}")
-            Log.d(TAG, "  - Model file size: ${modelFile.length()} bytes")
-
-            // LLM 로드 직전 메모리 확보 (저사양 기기 대응)
-            System.gc()
-
-            try {
-                val env = OrtEnvironment.getEnvironment()
-                val sessionOptions = OrtSession.SessionOptions().apply {
-                    // S10e 등 저사양 디바이스 대응: 스레드 수 최소화, 순차 실행, 세션 전용 스레드 풀 비활성화
-                    setIntraOpNumThreads(1)
-                    setInterOpNumThreads(1)
-                    setExecutionMode(OrtSession.SessionOptions.ExecutionMode.SEQUENTIAL)
-                }
-                val session = env.createSession(modelFile.absolutePath, sessionOptions)
-
-                // 입출력 메타데이터 로깅 (모델 구조 파악용)
-                Log.d(TAG, "=== ONNX Model IO Info ===")
-                session.inputNames.forEach { name ->
-                    val info: NodeInfo? = session.inputInfo[name]
-                    val tensorInfo = info?.info as? TensorInfo
-                    Log.d(
-                        TAG,
-                        "  - Input: $name, type=${tensorInfo?.type}, shape=${tensorInfo?.shape?.joinToString()}"
-                    )
-                }
-                session.outputNames.forEach { name ->
-                    val info: NodeInfo? = session.outputInfo[name]
-                    val tensorInfo = info?.info as? TensorInfo
-                    Log.d(
-                        TAG,
-                        "  - Output: $name, type=${tensorInfo?.type}, shape=${tensorInfo?.shape?.joinToString()}"
-                    )
-                }
-
-                ortEnv = env
-                ortSession = session
+            val ok = llamaManager.initModel()
+            if (ok) {
                 isInitialized = true
                 initializationAttempted = true
-
-                Log.i(TAG, "=== ONNX LLM Initialized Successfully ===")
-                true
-            } catch (e: OutOfMemoryError) {
-                Log.e(TAG, "=== Out of Memory during ONNX LLM initialization ===", e)
-                val runtime = Runtime.getRuntime()
-                Log.e(TAG, "  - Total memory: ${runtime.totalMemory() / 1_000_000}MB")
-                Log.e(TAG, "  - Free memory: ${runtime.freeMemory() / 1_000_000}MB")
-                Log.e(TAG, "  - Max memory: ${runtime.maxMemory() / 1_000_000}MB")
-                e.printStackTrace()
-                false
-            } catch (e: Exception) {
-                Log.e(TAG, "=== Exception during ONNX LLM initialization ===", e)
-                Log.e(TAG, "  - Exception type: ${e.javaClass.name}")
-                Log.e(TAG, "  - Exception message: ${e.message}")
-                e.printStackTrace()
-                false
+                Log.i(TAG, "=== LLM backend: llama.cpp + Qwen (LlamaManager) ===")
+                return@withContext true
             }
-        } catch (e: OutOfMemoryError) {
-            Log.e(TAG, "=== Out of Memory Error (Outer) ===", e)
-            Log.e(TAG, "Not enough memory to initialize ONNX LLM")
-            val runtime = Runtime.getRuntime()
-            Log.e(TAG, "  - Total memory: ${runtime.totalMemory() / 1_000_000}MB")
-            Log.e(TAG, "  - Free memory: ${runtime.freeMemory() / 1_000_000}MB")
-            Log.e(TAG, "  - Max memory: ${runtime.maxMemory() / 1_000_000}MB")
-            e.printStackTrace()
-            false
-        } catch (e: Exception) {
-            Log.e(TAG, "=== General Exception (Outer Catch) ===", e)
-            Log.e(TAG, "Failed to initialize ONNX LLM")
-            Log.e(TAG, "  - Exception type: ${e.javaClass.name}")
-            Log.e(TAG, "  - Exception message: ${e.message}")
-            Log.e(TAG, "  - Exception cause: ${e.cause}")
-            e.printStackTrace()
-            false
         } catch (e: Throwable) {
-            Log.e(TAG, "=== Fatal Error ===", e)
-            Log.e(TAG, "Fatal error during LLM initialization")
-            Log.e(TAG, "  - Error type: ${e.javaClass.name}")
-            Log.e(TAG, "  - Error message: ${e.message}")
-            e.printStackTrace()
-            false
+            Log.w(TAG, "LlamaManager init failed: ${e.message}", e)
         }
+        false
     }
 
     /**
@@ -304,7 +95,7 @@ class LLMScamDetector @Inject constructor(
      *
      * @return 초기화 완료 및 인스턴스 존재 시 true
      */
-    fun isAvailable(): Boolean = isInitialized && ortSession != null
+    fun isAvailable(): Boolean = isInitialized
 
     /**
      * 주어진 텍스트를 LLM으로 분석하여 스캠 여부와 상세 결과를 반환한다.
@@ -323,313 +114,71 @@ class LLMScamDetector @Inject constructor(
         Log.d(TAG, "  - Context provided: ${llmContext != null}")
 
         if (!isAvailable()) {
-            Log.w(TAG, "LLM not available (isInitialized=$isInitialized, ortSession=${ortSession != null}), skipping analysis")
+            Log.w(TAG, "LLM not available (isInitialized=$isInitialized), skipping analysis")
             return@withContext null
         }
 
         try {
-            Log.d(TAG, "Building prompt...")
-            val prompt = buildPrompt(input, llmContext)
-            Log.d(TAG, "  - Prompt length: ${prompt.length} chars")
-            Log.v(TAG, "  - Prompt preview: ${prompt.take(200)}...")
-
-            // 1단계: 토크나이저를 통해 프롬프트를 토큰 ID로 변환
-            val tokenizer = SmolLmTokenizer(this@LLMScamDetector.context)
-            val promptIds = tokenizer.encode(prompt, addBosEos = true)
-            Log.d(TAG, "Encoded prompt to token ids (SmolLM2)")
-            Log.d(TAG, "  - Token count: ${promptIds.size}")
-            Log.d(TAG, "  - Ids preview: ${promptIds.take(16)}")
-
-            // 2단계: ONNX 모델에 한 스텝(inference 1회) 넣어서 다음 토큰 1개만 생성
-            //  - input_ids / attention_mask / position_ids + past_key_values.*(zero 초기값)
-            //  - logits에서 마지막 토큰 위치의 argmax를 nextTokenId로 사용
-            val env = ortEnv ?: OrtEnvironment.getEnvironment()
-            val session = ortSession
-            if (session == null) {
-                Log.e(TAG, "ONNX session is null despite isAvailable() == true")
+            val userInput = buildLlamaUserInput(input, llmContext)
+            Log.d(TAG, "LlamaManager.analyzeText() (length=${userInput.length})")
+            val response = llamaManager.analyzeText(userInput)
+            if (response.isBlank() || response == "분석 실패") {
+                Log.w(TAG, "LlamaManager returned empty or fallback")
                 return@withContext null
             }
-
-            val seqLen = promptIds.size
-            if (seqLen == 0) {
-                Log.w(TAG, "Prompt token sequence is empty, skipping LLM inference")
-                return@withContext null
+            val result = parseResponse(response)
+            if (result != null) {
+                Log.d(TAG, "=== LLM Analysis Success (llama.cpp + Qwen) ===")
+                Log.d(TAG, "  - isScam: ${result.isScam}, confidence: ${result.confidence}")
             }
-
-            // [1, seqLen] 형태의 Long 텐서들 생성
-            val inputIds2d = arrayOf(promptIds)
-            val attentionMask1d = LongArray(seqLen) { 1L }
-            val attentionMask2d = arrayOf(attentionMask1d)
-            val positionIds1d = LongArray(seqLen) { idx -> idx.toLong() }
-            val positionIds2d = arrayOf(positionIds1d)
-
-            val inputs = mutableMapOf<String, OnnxTensor>()
-
-            try {
-                inputs["input_ids"] = OnnxTensor.createTensor(env, inputIds2d)
-                inputs["attention_mask"] = OnnxTensor.createTensor(env, attentionMask2d)
-                inputs["position_ids"] = OnnxTensor.createTensor(env, positionIds2d)
-
-                // past_key_values.* : 첫 스텝에서는 0으로 채운 작은 캐시를 사용
-                // shape: [1, 3, pastSeqLen, 64]  (pastSeqLen은 1로 설정)
-                val numLayers = 30
-                val numHeads = 3
-                val pastSeqLen = 1
-                val headDim = 64
-                val pastShape = longArrayOf(1L, numHeads.toLong(), pastSeqLen.toLong(), headDim.toLong())
-                val pastSize = pastShape.fold(1L) { acc, v -> acc * v }.toInt()
-
-                for (layer in 0 until numLayers) {
-                    val keyName = "past_key_values.$layer.key"
-                    val valueName = "past_key_values.$layer.value"
-
-                    // FLOAT16 텐서는 ShortBuffer 기반 텐서로 생성 (0으로 초기화)
-                    fun createZeroFloat16Tensor(): OnnxTensor {
-                        val byteBuffer: ByteBuffer = ByteBuffer.allocateDirect(2 * pastSize)
-                            .order(ByteOrder.nativeOrder())
-                        val shortBuffer: ShortBuffer = byteBuffer.asShortBuffer()
-                        for (i in 0 until pastSize) {
-                            shortBuffer.put(0.toShort())
-                        }
-                        shortBuffer.rewind()
-                        // [수정] OnnxJavaType.FLOAT16을 지정하여 ShortBuffer가 Int16이 아닌 Float16임을 명시
-                        return OnnxTensor.createTensor(env, shortBuffer, pastShape, OnnxJavaType.FLOAT16)
-                    }
-
-                    inputs[keyName] = createZeroFloat16Tensor()
-                    inputs[valueName] = createZeroFloat16Tensor()
-                }
-
-                Log.d(TAG, "Running ONNX session for 1-step generation...")
-
-                var nextTokenId: Int? = null
-                var nextTokenText: String = ""
-
-                session.run(inputs).use { results ->
-                    val logitsTensor = results.get("logits") as? OnnxTensor
-                    if (logitsTensor == null) {
-                        Log.e(TAG, "ONNX output 'logits' is null or missing")
-                        return@use
-                    }
-
-                    @Suppress("UNCHECKED_CAST")
-                    val logitsArray = logitsTensor.value as Array<Array<FloatArray>>
-                    if (logitsArray.isEmpty() || logitsArray[0].isEmpty()) {
-                        Log.e(TAG, "ONNX logits tensor is empty")
-                        return@use
-                    }
-
-                    val lastLogits = logitsArray[0][logitsArray[0].size - 1]
-                    if (lastLogits.isEmpty()) {
-                        Log.e(TAG, "Last logits array is empty")
-                        return@use
-                    }
-
-                    // greedy argmax
-                    var maxIdx = 0
-                    var maxVal = lastLogits[0]
-                    for (i in 1 until lastLogits.size) {
-                        val v = lastLogits[i]
-                        if (v > maxVal) {
-                            maxVal = v
-                            maxIdx = i
-                        }
-                    }
-                    nextTokenId = maxIdx
-                    nextTokenText = tokenizer.decode(longArrayOf(nextTokenId!!.toLong()))
-
-                    Log.d(TAG, "ONNX 1-step generation finished")
-                    Log.d(TAG, "  - nextTokenId: $nextTokenId")
-                    Log.d(TAG, "  - nextTokenText: \"$nextTokenText\"")
-                }
-
-                if (nextTokenId == null) {
-                    Log.e(TAG, "Failed to obtain next token from ONNX logits")
-                    return@withContext null
-                }
-
-                Log.d(TAG, "Generating LLM response (SIMULATED JSON, USING ONNX TOKEN)...")
-
-                // 현재는 개발 단계이므로, Rule/URL 컨텍스트 + ONNX에서 선택한 토큰 정보를
-                // 합쳐서 LLM 응답 JSON을 임시로 생성하여 전체 파이프라인(알림 표시)을 검증한다.
-
-                val baseConfidence = (llmContext?.ruleConfidence ?: 0.5f).coerceIn(0f, 1f)
-                val isScam = baseConfidence > 0.5f
-                val scamType = when {
-                    llmContext?.ruleReasons?.any { it.contains("투자") || it.contains("수익") || it.contains("코인") || it.contains("주식") } == true ->
-                        "투자사기"
-                    llmContext?.ruleReasons?.any { it.contains("중고") || it.contains("입금") || it.contains("선결제") || it.contains("거래") } == true ->
-                        "중고거래사기"
-                    llmContext?.urls?.isNotEmpty() == true || llmContext?.suspiciousUrls?.isNotEmpty() == true ->
-                        "피싱"
-                    else -> if (isScam) "사기" else "정상"
-                }
-
-                val reasons = buildList {
-                    addAll(llmContext?.ruleReasons?.take(5) ?: emptyList())
-                    if (llmContext?.suspiciousUrls?.isNotEmpty() == true) {
-                        add("의심 URL 포함: ${llmContext.suspiciousUrls.take(3).joinToString()}")
-                    }
-                    if (nextTokenText.isNotBlank()) {
-                        add("ONNX LLM이 생성한 토큰: \"$nextTokenText\" (id=$nextTokenId)")
-                    } else {
-                        add("ONNX LLM이 선택한 토큰 id: $nextTokenId")
-                    }
-                }
-
-                val suspiciousParts = buildList {
-                    addAll(llmContext?.detectedKeywords?.take(3) ?: emptyList())
-                    if (llmContext?.suspiciousUrls?.isNotEmpty() == true) {
-                        addAll(llmContext.suspiciousUrls.take(2))
-                    }
-                    if (nextTokenText.isNotBlank()) {
-                        add(nextTokenText)
-                    }
-                }
-
-                val tokenSnippet = if (nextTokenText.isNotBlank()) {
-                    " (모델이 바로 다음으로 \"${nextTokenText}\" 토큰을 선택함)"
-                } else {
-                    " (모델이 다음 토큰 id=$nextTokenId 를 선택함)"
-                }
-
-                val warningMessage = if (isScam) {
-                    "이 대화는 ${scamType} 유형으로 강하게 의심됩니다 (ONNX LLM 1스텝 결과). 상대방의 요청을 바로 따르지 말고 한 번 더 확인하세요.$tokenSnippet"
-                } else {
-                    "현재까지는 뚜렷한 사기 패턴이 감지되지 않았습니다 (ONNX LLM 1스텝 결과). 그래도 링크 클릭이나 송금 전에는 항상 주의하세요.$tokenSnippet"
-                }
-
-                val simulatedJson = """
-                {
-                  "isScam": $isScam,
-                  "confidence": $baseConfidence,
-                  "scamType": "$scamType",
-                  "warningMessage": "$warningMessage",
-                  "reasons": ${gson.toJson(reasons)},
-                  "suspiciousParts": ${gson.toJson(suspiciousParts)}
-                }
-                """.trimIndent()
-
-                Log.d(TAG, "Simulated LLM JSON (with ONNX token): $simulatedJson")
-
-                val result = parseResponse(simulatedJson)
-
-                if (result == null) {
-                    Log.w(TAG, "Failed to parse simulated LLM response")
-                } else {
-                    Log.d(TAG, "=== LLM Analysis Success (ONNX 1-step + SIMULATED JSON) ===")
-                    Log.d(TAG, "  - isScam: ${result.isScam}")
-                    Log.d(TAG, "  - confidence: ${result.confidence}")
-                    Log.d(TAG, "  - scamType: ${result.scamType}")
-                    Log.d(TAG, "  - reasons count: ${result.reasons.size}")
-                }
-
-                result
-            } finally {
-                // 입력 텐서 리소스 정리
-                inputs.values.forEach {
-                    try {
-                        it.close()
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error while closing input tensor", e)
-                    }
-                }
-            }
+            return@withContext result
         } catch (e: Exception) {
-            Log.e(TAG, "=== Error during LLM analysis ===", e)
-            Log.e(TAG, "  - Exception type: ${e.javaClass.name}")
-            Log.e(TAG, "  - Exception message: ${e.message}")
-            Log.e(TAG, "  - Exception cause: ${e.cause}")
-            Log.e(TAG, "  - Text length: ${text.length} chars")
-            Log.e(TAG, "  - LLM available: ${isAvailable()}")
-            e.printStackTrace()
-            null
-        } catch (e: Throwable) {
-            Log.e(TAG, "=== Fatal error during LLM analysis ===", e)
-            Log.e(TAG, "  - Error type: ${e.javaClass.name}")
-            Log.e(TAG, "  - Error message: ${e.message}")
-            e.printStackTrace()
-            null
+            Log.e(TAG, "LlamaManager.analyzeText() error", e)
+            return@withContext null
         }
     }
 
     /**
-     * 스캠 탐지용 시스템 프롬프트와 사용자 메시지를 조합한 프롬프트를 생성한다.
-     *
-     * @param text 분석 대상 채팅 메시지
-     * @param llmContext Rule 기반·URL 분석 등 추가 컨텍스트
-     * @return JSON만 출력하도록 지시한 프롬프트 문자열
+     * LlamaManager(Qwen)에 넘길 사용자 입력을 만든다.
+     * Rule/URL 컨텍스트 + [메시지] 형태로, Qwen이 JSON으로 답하도록 시스템 프롬프트에서 지시함.
      */
-    private fun buildPrompt(text: String, llmContext: LlmContext?): String {
+    private fun buildLlamaUserInput(text: String, llmContext: LlmContext?): String {
+        val contextBlock = buildContextBlock(llmContext)
+        return if (contextBlock.isNotBlank()) {
+            "$contextBlock\n\n[메시지]\n$text"
+        } else {
+            "[메시지]\n$text"
+        }
+    }
+
+    /** Rule/URL 1차 분석 요약 문자열 (buildLlamaUserInput용) */
+    private fun buildContextBlock(llmContext: LlmContext?): String {
         val maxListItems = 8
-        val contextBlock = buildString {
+        return buildString {
             if (llmContext == null) return@buildString
 
             if (llmContext.ruleConfidence != null || llmContext.ruleReasons.isNotEmpty() || llmContext.detectedKeywords.isNotEmpty()) {
                 appendLine("[Rule-based 1차 분석 요약]")
-                llmContext.ruleConfidence?.let {
-                    appendLine("- rule_confidence: $it")
-                }
+                llmContext.ruleConfidence?.let { appendLine("- rule_confidence: $it") }
                 if (llmContext.detectedKeywords.isNotEmpty()) {
-                    val kw = llmContext.detectedKeywords.take(maxListItems)
-                    appendLine("- detected_keywords: ${kw.joinToString()}")
+                    appendLine("- detected_keywords: ${llmContext.detectedKeywords.take(maxListItems).joinToString()}")
                 }
                 if (llmContext.ruleReasons.isNotEmpty()) {
                     appendLine("- rule_reasons:")
-                    llmContext.ruleReasons.take(maxListItems).forEach { reason ->
-                        appendLine("  - $reason")
-                    }
+                    llmContext.ruleReasons.take(maxListItems).forEach { appendLine("  - $it") }
                 }
                 appendLine()
             }
-
             if (llmContext.urls.isNotEmpty() || llmContext.suspiciousUrls.isNotEmpty() || llmContext.urlReasons.isNotEmpty()) {
                 appendLine("[URL/DB 기반 분석 요약]")
-                if (llmContext.urls.isNotEmpty()) {
-                    val urls = llmContext.urls.take(maxListItems)
-                    appendLine("- urls: ${urls.joinToString()}")
-                }
-                if (llmContext.suspiciousUrls.isNotEmpty()) {
-                    val sus = llmContext.suspiciousUrls.take(maxListItems)
-                    appendLine("- suspicious_urls: ${sus.joinToString()}")
-                }
+                if (llmContext.urls.isNotEmpty()) appendLine("- urls: ${llmContext.urls.take(maxListItems).joinToString()}")
+                if (llmContext.suspiciousUrls.isNotEmpty()) appendLine("- suspicious_urls: ${llmContext.suspiciousUrls.take(maxListItems).joinToString()}")
                 if (llmContext.urlReasons.isNotEmpty()) {
                     appendLine("- url_reasons:")
-                    llmContext.urlReasons.take(maxListItems).forEach { reason ->
-                        appendLine("  - $reason")
-                    }
+                    llmContext.urlReasons.take(maxListItems).forEach { appendLine("  - $it") }
                 }
             }
         }.trimEnd()
-
-        return """
-당신은 사기 탐지 전문가입니다. 다음 메시지를 분석하고 JSON 형식으로만 응답하세요.
-
-[배경 정보]
-- 먼저 규칙 기반 분석기와 URL 분석기가 1차로 메시지를 평가했습니다.
-- 아래 [Rule-based 1차 분석 요약]과 [URL/DB 기반 분석 요약]을 참고하여 최종 판단을 내려주세요.
-- KISA 피싱사이트 DB 등록 URL 등은 매우 강한 스캠 신호입니다.
-
-[Rule-based 1차 분석 요약과 URL/DB 기반 분석 요약은 없을 수도 있습니다]
-${if (contextBlock.isNotBlank()) contextBlock else "(제공된 사전 분석 정보 없음)"}
-
-[탐지 대상]
-1. 투자 사기: 고수익 보장, 원금 보장, 긴급 투자 권유, 비공개 정보 제공, 코인/주식 리딩방
-2. 중고거래 사기: 선입금 요구, 안전결제 우회, 급매 압박, 타 플랫폼 유도, 직거래 회피, 허위 매물
-
-[메시지]
-$text
-
-[응답 형식 - JSON만 출력하세요]
-{
-  "isScam": true 또는 false,
-  "confidence": 0.0부터 1.0 사이 숫자,
-  "scamType": "투자사기" 또는 "중고거래사기" 또는 "피싱" 또는 "정상",
-  "warningMessage": "사용자에게 보여줄 경고 메시지 (한국어, 2문장 이내)",
-  "reasons": ["위험 요소 1", "위험 요소 2"],
-  "suspiciousParts": ["의심되는 문구 인용"]
-}
-""".trimIndent()
     }
 
     /**
@@ -709,13 +258,10 @@ $text
      */
     fun close() {
         try {
-            ortSession?.close()
+            llamaManager.close()
         } catch (e: Exception) {
-            Log.w(TAG, "Error while closing ONNX session", e)
+            Log.w(TAG, "Error while closing LlamaManager", e)
         }
-        ortSession = null
-        // OrtEnvironment는 전역 singleton이라 명시적으로 닫지 않고 null만 클리어
-        ortEnv = null
         isInitialized = false
         initializationAttempted = false
     }
