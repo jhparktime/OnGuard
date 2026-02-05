@@ -1,4 +1,4 @@
-package com.k2fsa.sherpa.onnx
+package com.onguard.llm.stub
 
 /**
  * 간단한 stub 구현입니다.

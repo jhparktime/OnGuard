@@ -145,11 +145,4 @@ dependencies {
     implementation("androidx.compose.material3:material3:1.1.2")
     implementation("androidx.savedstate:savedstate-ktx:1.2.1")
     implementation("androidx.activity:activity-compose:1.8.1")
-
-    // Sherpa-ONNX: 로컬 AAR(optional)
-    // 프로젝트 루트 기준 app/libs/sherpa-onnx.aar 가 존재할 때만 의존성을 추가한다.
-    val sherpaOnnxAar = file("libs/sherpa-onnx.aar")
-    if (sherpaOnnxAar.exists()) {
-        implementation(files(sherpaOnnxAar))
-    }
 }

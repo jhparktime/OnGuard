@@ -2,8 +2,8 @@ package com.onguard.llm
 
 import android.content.Context
 import android.util.Log
-import com.k2fsa.sherpa.onnx.OfflineLlm
-import com.k2fsa.sherpa.onnx.OfflineLlmConfig
+import com.onguard.llm.stub.OfflineLlm
+import com.onguard.llm.stub.OfflineLlmConfig
 import com.onguard.util.DebugLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
