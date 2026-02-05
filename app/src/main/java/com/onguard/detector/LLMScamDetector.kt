@@ -57,8 +57,14 @@ class LLMScamDetector @Inject constructor() : ScamLlmClient {
      * - 간단한 일일 호출 상한 (BuildConfig.GEMINI_MAX_CALLS_PER_DAY)
      */
     fun isAvailable(): Boolean {
-        if (!BuildConfig.ENABLE_LLM) return false
-        if (BuildConfig.GEMINI_API_KEY.isBlank()) return false
+        if (!BuildConfig.ENABLE_LLM) {
+            DebugLog.warnLog(TAG) { "step=isAvailable false reason=ENABLE_LLM_disabled" }
+            return false
+        }
+        if (BuildConfig.GEMINI_API_KEY.isBlank()) {
+            DebugLog.warnLog(TAG) { "step=isAvailable false reason=GEMINI_API_KEY_empty" }
+            return false
+        }
 
         // 날짜가 바뀌면 카운터 리셋
         val today = LocalDate.now()
@@ -71,7 +77,11 @@ class LLMScamDetector @Inject constructor() : ScamLlmClient {
         val available = callsToday < maxCallsPerDay
         if (!available) {
             DebugLog.warnLog(TAG) {
-                "step=quota_exceeded callsToday=$callsToday maxCallsPerDay=$maxCallsPerDay"
+                "step=isAvailable false reason=quota_exceeded callsToday=$callsToday maxCallsPerDay=$maxCallsPerDay"
+            }
+        } else {
+            DebugLog.debugLog(TAG) {
+                "step=isAvailable true callsToday=$callsToday maxCallsPerDay=$maxCallsPerDay"
             }
         }
         return available
