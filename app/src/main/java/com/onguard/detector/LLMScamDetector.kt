@@ -32,9 +32,11 @@ class LLMScamDetector @Inject constructor() : ScamLlmClient {
     companion object {
         private const val TAG = "OnGuardLLM"
 
-        // Gemini 1.5 Flash REST 엔드포인트
+        // Gemini 2.5 Flash REST 엔드포인트 (안정 버전, 무료 티어 지원)
+        // 최신 모델: gemini-3-flash-preview (프리뷰), gemini-2.5-flash (안정)
+        // 무료 티어에서는 gemini-2.5-flash 사용 권장
         private const val GEMINI_BASE_URL =
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
         private var callsToday: Int = 0
         private var lastDate: LocalDate = LocalDate.now()
