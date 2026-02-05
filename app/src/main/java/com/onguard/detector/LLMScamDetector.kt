@@ -23,7 +23,7 @@ import javax.inject.Singleton
 class LLMScamDetector @Inject constructor(
     @ApplicationContext private val context: Context,
     private val llamaManager: LlamaManager
-) {
+) : LLMScamAnalyzer {
     companion object {
         private const val TAG = "LLMScamDetector"
         private const val MAX_INPUT_CHARS = 1500

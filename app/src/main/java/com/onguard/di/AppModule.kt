@@ -1,6 +1,7 @@
 package com.onguard.di
 
 import android.content.Context
+import com.onguard.domain.usecase.PhoneAccountValidator
 import com.onguard.llm.LlamaManager
 import dagger.Module
 import dagger.Provides
@@ -24,4 +25,8 @@ object AppModule {
     fun provideLlamaManager(@ApplicationContext context: Context): LlamaManager {
         return LlamaManager(context)
     }
+
+    @Provides
+    @Singleton
+    fun providePhoneAccountValidator(): PhoneAccountValidator = PhoneAccountValidator.Default
 }

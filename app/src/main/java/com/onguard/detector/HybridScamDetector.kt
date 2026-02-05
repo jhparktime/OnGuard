@@ -11,7 +11,7 @@ import kotlin.math.max
 /**
  * 하이브리드 스캠 탐지기.
  *
- * Rule-based([KeywordMatcher], [UrlAnalyzer])와 LLM([LLMScamDetector]) 탐지를 결합하여
+ * Rule-based([KeywordMatcher], [UrlAnalyzer])와 LLM([LLMScamAnalyzer]) 탐지를 결합하여
  * 정확도 높은 스캠 탐지를 수행한다.
  *
  * ## 탐지 흐름
@@ -19,40 +19,21 @@ import kotlin.math.max
  * 2. 신뢰도 0.3~0.7 구간이면 LLM 추가 분석
  * 3. 가중 평균(Rule 40%, LLM 60%)으로 최종 판정
  *
- * ## 임계값
- * - 0.7 초과: 고위험, 즉시 스캠 판정 (LLM 미호출)
- * - 0.4~0.7: 중위험, 조합 보너스 후 필요 시 LLM 호출
- * - 0.3~0.7: LLM 트리거 구간
- * - 0.5 초과: 최종 스캠 판정
- *
  * @param keywordMatcher 키워드 기반 규칙 탐지기
  * @param urlAnalyzer URL 위험도 분석기
- * @param llmScamDetector LLM 기반 탐지기 (선택)
+ * @param llmScamAnalyzer LLM 기반 탐지기 (테스트 시 mock 주입 가능)
+ * @param config 임계값·가중치 (테스트 시 다른 값 주입 가능)
  */
 @Singleton
 class HybridScamDetector @Inject constructor(
     private val keywordMatcher: KeywordMatcher,
     private val urlAnalyzer: UrlAnalyzer,
-    private val llmScamDetector: LLMScamDetector
+    private val llmScamAnalyzer: LLMScamAnalyzer,
+    private val config: HybridScamDetectorConfig = HybridScamDetectorConfig.Default
 ) {
 
     companion object {
         private const val TAG = "HybridScamDetector"
-
-        // 고위험 임계값: 70% 이상이면 즉시 스캠 판정
-        private const val HIGH_CONFIDENCE_THRESHOLD = 0.7f
-
-        // 중위험 임계값: 40% 이상이면 추가 조합 분석 수행
-        private const val MEDIUM_CONFIDENCE_THRESHOLD = 0.4f
-        private const val LOW_CONFIDENCE_THRESHOLD = 0.3f
-
-        // LLM 분석 조건: Rule-based 결과가 애매한 경우
-        private const val LLM_TRIGGER_LOW = 0.3f
-        private const val LLM_TRIGGER_HIGH = 0.7f
-
-        // 가중치
-        private const val RULE_WEIGHT = 0.4f
-        private const val LLM_WEIGHT = 0.6f
     }
 
     /**
@@ -60,13 +41,13 @@ class HybridScamDetector @Inject constructor(
      * Application 시작 시 호출 권장
      */
     suspend fun initializeLLM(): Boolean {
-        return llmScamDetector.initialize()
+        return llmScamAnalyzer.initialize()
     }
 
     /**
      * LLM 사용 가능 여부
      */
-    fun isLLMAvailable(): Boolean = llmScamDetector.isAvailable()
+    fun isLLMAvailable(): Boolean = llmScamAnalyzer.isAvailable()
 
     /**
      * 주어진 텍스트를 분석하여 스캠 여부와 상세 결과를 반환한다.
@@ -101,7 +82,7 @@ class HybridScamDetector @Inject constructor(
         ruleConfidence = ruleConfidence.coerceIn(0f, 1f)
 
         // 5. Early return for very high confidence (명확한 스캠)
-        if (ruleConfidence > HIGH_CONFIDENCE_THRESHOLD) {
+        if (ruleConfidence > config.highConfidenceThreshold) {
             Log.d(TAG, "High confidence rule-based detection: $ruleConfidence")
             return createRuleBasedResult(
                 ruleConfidence,
@@ -112,7 +93,7 @@ class HybridScamDetector @Inject constructor(
         }
 
         // 6. Additional combination checks for medium confidence
-        if (ruleConfidence > MEDIUM_CONFIDENCE_THRESHOLD) {
+        if (ruleConfidence > config.mediumConfidenceThreshold) {
             val hasUrgency = text.contains("긴급", ignoreCase = true) ||
                     text.contains("급하", ignoreCase = true) ||
                     text.contains("빨리", ignoreCase = true)
@@ -131,17 +112,17 @@ class HybridScamDetector @Inject constructor(
         }
 
         // 7. LLM 분석 (애매한 경우에만, 그리고 그 시점에 지연 초기화 시도)
-        if (useLLM && ruleConfidence in LLM_TRIGGER_LOW..LLM_TRIGGER_HIGH) {
+        if (useLLM && ruleConfidence in config.llmTriggerLow..config.llmTriggerHigh) {
             Log.d(TAG, "LLM candidate range, confidence=$ruleConfidence (will try lazy init if needed)")
 
             // 아직 초기화 안 되어 있으면, 이 시점에서 한 번만 초기화 시도
-            if (!llmScamDetector.isAvailable()) {
+            if (!llmScamAnalyzer.isAvailable()) {
                 Log.d(TAG, "LLM not initialized yet. Trying lazy initialization...")
                 try {
-                    val initSuccess = llmScamDetector.initialize()
+                    val initSuccess = llmScamAnalyzer.initialize()
                     Log.d(
                         TAG,
-                        "Lazy LLM initialization result: success=$initSuccess, available=${llmScamDetector.isAvailable()}"
+                        "Lazy LLM initialization result: success=$initSuccess, available=${llmScamAnalyzer.isAvailable()}"
                     )
                 } catch (e: Exception) {
                     Log.e(TAG, "Error during lazy LLM initialization", e)
@@ -149,7 +130,7 @@ class HybridScamDetector @Inject constructor(
             }
 
             // 초기화 이후에도 사용 불가하면 LLM 분석은 건너뛴다
-            if (!llmScamDetector.isAvailable()) {
+            if (!llmScamAnalyzer.isAvailable()) {
                 Log.w(TAG, "LLM still not available after lazy init. Falling back to rule-based result.")
             } else {
                 Log.d(TAG, "Triggering LLM analysis for confidence: $ruleConfidence")
@@ -163,7 +144,7 @@ class HybridScamDetector @Inject constructor(
                     urlReasons = urlResult.reasons
                 )
 
-                val llmResult = llmScamDetector.analyze(text, llmContext)
+                val llmResult = llmScamAnalyzer.analyze(text, llmContext)
 
                 Log.d(
                     TAG,
@@ -180,7 +161,8 @@ class HybridScamDetector @Inject constructor(
                         ruleConfidence = ruleConfidence,
                         ruleReasons = combinedReasons,
                         detectedKeywords = keywordResult.detectedKeywords,
-                        llmResult = llmResult
+                        llmResult = llmResult,
+                        config = config
                     )
                 }
             }
@@ -208,10 +190,11 @@ class HybridScamDetector @Inject constructor(
         ruleConfidence: Float,
         ruleReasons: List<String>,
         detectedKeywords: List<String>,
-        llmResult: ScamAnalysis
+        llmResult: ScamAnalysis,
+        config: HybridScamDetectorConfig
     ): ScamAnalysis {
         // 가중 평균으로 최종 신뢰도 계산
-        val combinedConfidence = (ruleConfidence * RULE_WEIGHT + llmResult.confidence * LLM_WEIGHT)
+        val combinedConfidence = (ruleConfidence * config.ruleWeight + llmResult.confidence * config.llmWeight)
             .coerceIn(0f, 1f)
 
         // 이유 목록 결합 (중복 제거)
@@ -220,7 +203,7 @@ class HybridScamDetector @Inject constructor(
         Log.d(TAG, "Combined result - Rule: $ruleConfidence, LLM: ${llmResult.confidence}, Final: $combinedConfidence")
 
         return ScamAnalysis(
-            isScam = combinedConfidence > 0.5f || llmResult.isScam,
+            isScam = combinedConfidence > config.finalScamThreshold || llmResult.isScam,
             confidence = combinedConfidence,
             reasons = allReasons,
             detectedKeywords = detectedKeywords,
@@ -246,88 +229,22 @@ class HybridScamDetector @Inject constructor(
         detectedKeywords: List<String>,
         hasUrlIssues: Boolean
     ): ScamAnalysis {
-        // Rule-based에서 스캠 유형 추론
-        val scamType = inferScamType(reasons)
-
-        // Rule-based 경고 메시지 생성
-        val warningMessage = generateRuleBasedWarning(scamType, confidence)
+        val scamType = ScamTypeInferrer.inferScamType(reasons)
+        val warningMessage = RuleBasedWarningGenerator.generateWarning(scamType, confidence)
 
         return ScamAnalysis(
-            isScam = confidence > 0.5f,
+            isScam = confidence > config.finalScamThreshold,
             confidence = confidence,
             reasons = reasons,
             detectedKeywords = detectedKeywords,
             detectionMethod = if (hasUrlIssues) DetectionMethod.HYBRID else DetectionMethod.RULE_BASED,
             scamType = scamType,
             warningMessage = warningMessage,
-            suspiciousParts = detectedKeywords.take(3)  // 상위 3개 키워드
+            suspiciousParts = detectedKeywords.take(3)
         )
     }
 
-    /**
-     * 규칙 기반 사유 문자열에서 [ScamType]을 추론한다.
-     *
-     * @param reasons 탐지 사유 목록 (키워드/패턴 설명)
-     * @return 추론된 [ScamType]
-     */
-    private fun inferScamType(reasons: List<String>): ScamType {
-        val reasonText = reasons.joinToString(" ")
-
-        return when {
-            reasonText.contains("투자") || reasonText.contains("수익") ||
-                    reasonText.contains("코인") || reasonText.contains("주식") -> ScamType.INVESTMENT
-
-            reasonText.contains("입금") || reasonText.contains("선결제") ||
-                    reasonText.contains("거래") || reasonText.contains("택배") -> ScamType.USED_TRADE
-
-            reasonText.contains("URL") || reasonText.contains("링크") ||
-                    reasonText.contains("피싱") -> ScamType.PHISHING
-
-            reasonText.contains("사칭") || reasonText.contains("기관") -> ScamType.IMPERSONATION
-
-            reasonText.contains("대출") -> ScamType.LOAN
-
-            else -> ScamType.UNKNOWN
-        }
-    }
-
-    /**
-     * Rule-based 전용 경고 메시지를 생성한다.
-     *
-     * @param scamType 스캠 유형
-     * @param confidence 신뢰도 (퍼센트 표시용)
-     * @return 사용자에게 표시할 한글 경고 문구
-     */
-    private fun generateRuleBasedWarning(scamType: ScamType, confidence: Float): String {
-        val confidencePercent = (confidence * 100).toInt()
-
-        return when (scamType) {
-            ScamType.INVESTMENT ->
-                "이 메시지는 투자 사기로 의심됩니다 (위험도 $confidencePercent%). 고수익을 보장하는 투자는 대부분 사기입니다."
-
-            ScamType.USED_TRADE ->
-                "중고거래 사기가 의심됩니다 (위험도 $confidencePercent%). 선입금을 요구하면 직거래로 진행하세요."
-
-            ScamType.PHISHING ->
-                "피싱 링크가 포함되어 있습니다 (위험도 $confidencePercent%). 의심스러운 링크를 클릭하지 마세요."
-
-            ScamType.IMPERSONATION ->
-                "사칭 사기가 의심됩니다 (위험도 $confidencePercent%). 공식 채널을 통해 확인하세요."
-
-            ScamType.LOAN ->
-                "대출 사기가 의심됩니다 (위험도 $confidencePercent%). 선수수료 요구는 불법입니다."
-
-            else ->
-                "사기 의심 메시지입니다 (위험도 $confidencePercent%). 주의하세요."
-        }
-    }
-
-    /**
-     * LLM 탐지기 리소스를 해제한다.
-     *
-     * 앱 종료 또는 탐지기 교체 시 호출한다.
-     */
     fun close() {
-        llmScamDetector.close()
+        llmScamAnalyzer.close()
     }
 }
