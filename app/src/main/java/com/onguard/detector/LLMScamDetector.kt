@@ -45,7 +45,7 @@ class LLMScamDetector @Inject constructor(
     private var isInitialized = false
     private var initializationAttempted = false
 
-    suspend fun initialize(): Boolean = withContext(Dispatchers.IO) {
+    override suspend fun initialize(): Boolean = withContext(Dispatchers.IO) {
         Log.d(TAG, "=== LLM Initialization (llama.cpp + Qwen) ===")
         if (isInitialized) {
             Log.d(TAG, "LLM already initialized.")
@@ -70,7 +70,7 @@ class LLMScamDetector @Inject constructor(
         }
     }
 
-    fun isAvailable(): Boolean = isInitialized
+    override fun isAvailable(): Boolean = isInitialized
 
     /**
      * 주어진 텍스트를 LLM으로 분석해 [ScamAnalysis] 반환.
@@ -79,7 +79,7 @@ class LLMScamDetector @Inject constructor(
      * @param llmContext Rule/URL 1차 분석 등 추가 컨텍스트 (선택)
      * @return 분석 결과. 미사용/빈 응답/파싱 실패 시 null
      */
-    suspend fun analyze(text: String, llmContext: LlmContext? = null): ScamAnalysis? = withContext(Dispatchers.Default) {
+    override suspend fun analyze(text: String, llmContext: LlmContext?): ScamAnalysis? = withContext(Dispatchers.Default) {
         val input = if (text.length > MAX_INPUT_CHARS) {
             Log.d(TAG, "Input truncated: ${text.length} -> $MAX_INPUT_CHARS chars")
             text.take(MAX_INPUT_CHARS)
@@ -154,7 +154,7 @@ class LLMScamDetector @Inject constructor(
         }.trimEnd()
     }
 
-    fun close() {
+    override fun close() {
         try {
             llamaManager.close()
         } catch (e: Exception) {

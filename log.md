@@ -4,6 +4,65 @@
 
 ---
 
+## [0.2.9] - 2026-02-05
+
+### Improved
+- **UI/UX 전면 개선** (P1)
+  - MainActivity 전체 한글화 및 UX 개선
+  - 오버레이 경고 배너 디자인 개선 (Material Design 스타일)
+  - Loading/Error 상태 UI 개선
+
+#### MainActivity.kt
+- **한글화 완료**
+  - 모든 UI 텍스트 한글화 ("보호 활성화됨", "탐지된 위협" 등)
+  - 앱 이름 번역 (kakao→카카오톡, telegram→텔레그램, daangn→당근마켓 등)
+  - 위험도 레벨 한글화 (높음/중간/낮음)
+- **UX 개선**
+  - SnackbarHost 추가로 에러 처리 개선
+  - FilledTonalButton 적용
+  - ServiceStatusCard에 설명 추가
+
+#### MainViewModel.kt
+- **Loading 상태 관리 추가**
+  - `MainUiState.isLoading` 필드 추가
+  - `loadRecentAlerts()` 시 로딩 상태 표시
+
+#### overlay_scam_warning.xml
+- **Material Design 스타일 적용**
+  - CardView 스타일 FrameLayout 구조
+  - 헤더/본문 분리 레이아웃
+  - 위험도별 배경색 동적 적용
+
+#### 새 Drawable 리소스
+- `overlay_card_background.xml`: 카드 배경 (16dp 라운드)
+- `btn_overlay_outline.xml`: 아웃라인 버튼 스타일
+- `btn_overlay_transparent.xml`: 투명 버튼 스타일
+
+#### OverlayService.kt
+- 새 레이아웃에 맞게 `warning_header`에 배경색 적용
+
+### Fixed
+- **빌드 환경 문제 해결**
+  - Gradle 8.5 → 8.13 업그레이드 (AGP 8.13.2 호환)
+  - Material Icons Extended 의존성 추가
+  - LLM 코드 override 모디파이어 추가
+  - `setMaxTokens` → `setNPredict` 수정 (java-llama.cpp API 변경)
+  - 기본 파라미터 값 제거 (override 함수 규칙)
+
+### Changed
+- **build.gradle.kts**
+  - `material-icons-extended` 의존성 추가
+  - 네이티브 CMake 빌드 임시 비활성화 (Windows 환경 이슈)
+- **gradle-wrapper.properties**
+  - `distributionUrl` 8.5 → 8.13 업그레이드
+
+### Technical Details
+- 영향 범위: Presentation 레이어 (MainActivity, MainViewModel, OverlayService)
+- 호환성: Android 8.0+ (minSdk 26)
+- 빌드 확인: BUILD SUCCESSFUL
+
+---
+
 ## [0.2.8] - 2026-02-03
 
 ### Added
@@ -339,4 +398,4 @@
 ---
 
 *Maintained by Backend Team*
-*Last Updated: 2026-02-03 (v0.2.8)*
+*Last Updated: 2026-02-05 (v0.2.9)*

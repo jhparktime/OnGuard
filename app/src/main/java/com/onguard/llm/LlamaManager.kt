@@ -30,7 +30,7 @@ class LlamaManager(private val context: Context) : LlamaBackend {
      *
      * @return [LlamaInitResult.Success] 또는 [LlamaInitResult.Failure]
      */
-    suspend fun initModel(): LlamaInitResult = withContext(Dispatchers.IO) {
+    override suspend fun initModel(): LlamaInitResult = withContext(Dispatchers.IO) {
         if (llamaModel != null) {
             Log.d(TAG, "Llama model already initialized.")
             return@withContext LlamaInitResult.Success
@@ -79,7 +79,7 @@ class LlamaManager(private val context: Context) : LlamaBackend {
      * @param input 사용자 입력 (Rule/URL 요약 + 메시지 등). [QwenPromptBuilder]로 ChatML 래핑됨
      * @return [LlamaAnalyzeResult] — Success(text), NotInitialized, EmptyInput, Error
      */
-    suspend fun analyzeText(input: String): LlamaAnalyzeResult = withContext(Dispatchers.IO) {
+    override suspend fun analyzeText(input: String): LlamaAnalyzeResult = withContext(Dispatchers.IO) {
         val model = llamaModel
         if (model == null) {
             Log.w(TAG, "analyzeText() called before initModel().")
@@ -100,7 +100,7 @@ class LlamaManager(private val context: Context) : LlamaBackend {
                 .setTemperature(LlamaConfig.DEFAULT_TEMPERATURE)
                 .setPenalizeNl(LlamaConfig.DEFAULT_PENALIZE_NL)
                 .setStopStrings(LlamaConfig.STOP_STRING_IM_END)
-                .setMaxTokens(LlamaConfig.DEFAULT_MAX_TOKENS)
+                .setNPredict(LlamaConfig.DEFAULT_MAX_TOKENS)
 
             val sb = StringBuilder()
             for (output in model.generate(inferParams)) {
@@ -133,7 +133,7 @@ class LlamaManager(private val context: Context) : LlamaBackend {
     /**
      * 모델과 네이티브 리소스 해제.
      */
-    fun close() {
+    override fun close() {
         try {
             llamaModel?.close()
         } catch (e: Exception) {

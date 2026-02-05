@@ -43,13 +43,14 @@ android {
         buildConfigField("String", "THECHEAT_API_KEY", "\"${properties.getProperty("THECHEAT_API_KEY", "")}\"")
         buildConfigField("String", "KISA_API_KEY", "\"${properties.getProperty("KISA_API_KEY", "")}\"")
 
-        externalNativeBuild {
-            cmake {
-                // java-llama.cpp C++ 빌드에 필요한 기본 설정
-                cppFlags += ""
-                arguments += listOf<String>()
-            }
-        }
+        // NOTE: 네이티브 빌드 환경 이슈로 임시 비활성화
+        // externalNativeBuild {
+        //     cmake {
+        //         // java-llama.cpp C++ 빌드에 필요한 기본 설정
+        //         cppFlags += ""
+        //         arguments += listOf<String>()
+        //     }
+        // }
     }
 
     buildTypes {
@@ -91,12 +92,14 @@ android {
     }
 
     // java-llama.cpp CMake & Java 소스 연결
-    externalNativeBuild {
-        cmake {
-            path = file("$jllamaLib/CMakeLists.txt")
-            version = "3.22.1"
-        }
-    }
+    // NOTE: 네이티브 빌드 환경 이슈로 임시 비활성화
+    // TODO: Windows 환경에서 CMake 빌드 설정 수정 필요
+    // externalNativeBuild {
+    //     cmake {
+    //         path = file("$jllamaLib/CMakeLists.txt")
+    //         version = "3.22.1"
+    //     }
+    // }
 
     sourceSets {
         getByName("main") {
@@ -118,6 +121,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.6.2")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
 

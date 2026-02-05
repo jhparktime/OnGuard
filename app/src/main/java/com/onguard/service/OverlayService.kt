@@ -194,18 +194,19 @@ class OverlayService : Service() {
         
         Log.d(TAG, "Overlay view created successfully")
 
-        // 신뢰도별 배경색 (Material Design 색상)
+        // 신뢰도별 헤더 배경색 (Material Design 색상)
         // - 90% 이상: 빨강 (#D32F2F) - 거의 확정적 스캠, 즉시 주의 필요
         // - 70~89%: 주황 (#F57C00) - 높은 위험, 주의 권고
         // - 50~69%: 황색 (#FFA000) - 의심 단계, 확인 권장
         // - 50% 미만: 노랑 (#FBC02D) - 낮은 위험
-        val backgroundColor = when {
+        val headerBackgroundColor = when {
             confidence >= 0.9f -> Color.parseColor("#D32F2F") // Red - 매우 위험
             confidence >= 0.7f -> Color.parseColor("#F57C00") // Orange - 위험
             confidence >= 0.5f -> Color.parseColor("#FFA000") // Amber - 주의
             else -> Color.parseColor("#FBC02D") // Yellow - 낮은 위험
         }
-        overlayView?.setBackgroundColor(backgroundColor)
+        // CardView 레이아웃: 헤더 영역(warning_header)에만 배경색 적용
+        overlayView?.findViewById<LinearLayout>(R.id.warning_header)?.setBackgroundColor(headerBackgroundColor)
 
         // 스캠 유형 표시
         overlayView?.findViewById<TextView>(R.id.scam_type_text)?.text = getScamTypeLabel(scamType)
