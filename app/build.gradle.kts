@@ -12,6 +12,9 @@ android {
     namespace = "com.onguard"
     compileSdk = 34
 
+    // java-llama.cpp 서브모듈 경로 (app/java-llama.cpp)
+    val jllamaLib = file("java-llama.cpp")
+
     defaultConfig {
         applicationId = "com.onguard"
         minSdk = 26
@@ -34,6 +37,18 @@ android {
 
         buildConfigField("String", "THECHEAT_API_KEY", "\"${properties.getProperty("THECHEAT_API_KEY", "")}\"")
         buildConfigField("String", "KISA_API_KEY", "\"${properties.getProperty("KISA_API_KEY", "")}\"")
+
+        // Windows(호스트)에서 Android 에뮬레이터(x86_64) 테스트를 위해 x86_64 ABI도 빌드
+        ndk {
+            abiFilters += setOf("arm64-v8a", "x86_64")
+        }
+
+        externalNativeBuild {
+            cmake {
+                // java-llama.cpp C++ 빌드에 필요한 기본 설정 (옵션은 필요 시 추가)
+                arguments += listOf()
+            }
+        }
     }
 
     buildTypes {
@@ -70,6 +85,21 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+
+    // java-llama.cpp CMake & Java 소스 연결
+    externalNativeBuild {
+        cmake {
+            path = file("$jllamaLib/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
+    sourceSets {
+        getByName("main") {
+            // java-llama.cpp의 Java 소스를 앱 빌드에 포함
+            java.srcDir("$jllamaLib/src/main/java")
         }
     }
 }
