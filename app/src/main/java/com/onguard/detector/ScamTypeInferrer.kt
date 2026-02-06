@@ -12,6 +12,11 @@ object ScamTypeInferrer {
     fun inferScamType(reasons: List<String>): ScamType {
         val reasonText = reasons.joinToString(" ")
         return when {
+            // 보이스피싱/스미싱 (전화번호 기반) - 가장 먼저 체크
+            reasonText.contains("보이스피싱") || reasonText.contains("스미싱") ||
+                reasonText.contains("Counter Scam") || reasonText.contains("전화번호") ||
+                reasonText.contains("신고 이력") -> ScamType.VOICE_PHISHING
+
             reasonText.contains("투자") || reasonText.contains("수익") ||
                 reasonText.contains("코인") || reasonText.contains("주식") -> ScamType.INVESTMENT
 

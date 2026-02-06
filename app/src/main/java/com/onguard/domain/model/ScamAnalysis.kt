@@ -54,6 +54,8 @@ enum class ScamType {
     USED_TRADE,
     /** 피싱 링크/사이트 */
     PHISHING,
+    /** 보이스피싱/스미싱 (전화번호 기반) */
+    VOICE_PHISHING,
     /** 기관/지인 사칭 */
     IMPERSONATION,
     /** 로맨스 스캠 */
