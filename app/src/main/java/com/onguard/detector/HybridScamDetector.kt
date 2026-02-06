@@ -40,6 +40,9 @@ class HybridScamDetector @Inject constructor(
     companion object {
         private const val TAG = "OnGuardHybrid"
 
+        // 최종 스캠 판정 임계값: 결합된 신뢰도가 0.5를 넘으면 스캠으로 간주
+        private const val FINAL_SCAM_THRESHOLD = 0.5f
+
         // 고위험 임계값: 70% 이상이면 즉시 스캠 판정
         private const val HIGH_CONFIDENCE_THRESHOLD = 0.7f
 

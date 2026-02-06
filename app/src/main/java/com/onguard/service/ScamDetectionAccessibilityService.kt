@@ -19,6 +19,9 @@ import kotlinx.coroutines.launch
 import java.lang.ref.WeakReference
 import javax.inject.Inject
 
+import android.util.Log // 10개 이상의 'Log' 관련 에러 해결
+import java.util.ArrayList
+
 /**
  * 접근성 서비스를 이용한 실시간 스캠 탐지 서비스.
  *
@@ -84,6 +87,21 @@ class ScamDetectionAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "OnGuardService"
+
+        // 필터링할 뷰 클래스 목록 (주로 키보드나 입력 관련 UI)
+        private val SKIP_VIEW_CLASSES = setOf(
+            "com.android.inputmethod",
+            "com.google.android.inputmethod",
+            "android.inputmethodservice.InputMethodService",
+            "SoftKeyboard",
+            "Keyboard",
+            "Ime"
+        )
+
+        // 필터링할 리소스 ID 패턴 (입력창, 검색바, 패스워드 등)
+        private val SKIP_RESOURCE_ID_PATTERNS = setOf(
+            "input", "edit", "search", "password", "id_input", "query"
+        )
 
         // 디바운스 지연: 100ms
         // - 사용자 타이핑 중 과도한 분석 방지
