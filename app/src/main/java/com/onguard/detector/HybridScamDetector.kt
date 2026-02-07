@@ -12,7 +12,7 @@ import kotlin.math.max
 /**
  * 하이브리드 스캠 탐지기.
  *
- * Rule-based([KeywordMatcher], [UrlAnalyzer], [PhoneAnalyzer], [AccountAnalyzer])와 LLM([LLMScamDetector]) 탐지를 결합하여
+ * Rule-based([KeywordMatcher], [UrlAnalyzer], [PhoneAnalyzer], [AccountAnalyzer])와 LLM([ScamLlmClient]) 탐지를 결합하여
  * 정확도 높은 스캠 탐지를 수행한다.
  *
  * ## 탐지 흐름
@@ -31,7 +31,7 @@ import kotlin.math.max
  * @param urlAnalyzer URL 위험도 분석기
  * @param phoneAnalyzer 전화번호 위험도 분석기 (Counter Scam 112 DB)
  * @param accountAnalyzer 계좌번호 위험도 분석기 (경찰청 사기계좌 DB)
- * @param llmScamDetector LLM 기반 탐지기 (Gemini API)
+ * @param scamLlmClient LLM 기반 탐지기 (Gemini API 또는 온디바이스 Gemma)
  */
 @Singleton
 class HybridScamDetector @Inject constructor(
@@ -40,7 +40,7 @@ class HybridScamDetector @Inject constructor(
     private val phoneAnalyzer: PhoneAnalyzer,
     private val scamLlmClient: ScamLlmClient,
     private val accountAnalyzer: AccountAnalyzer,
-    private val llmScamDetector: LLMScamDetector
+    private val scamLlmClient: ScamLlmClient
 ) {
 
     companion object {
@@ -101,30 +101,24 @@ class HybridScamDetector @Inject constructor(
         // 7. Calculate rule-based confidence
         var ruleConfidence = keywordResult.confidence
 
-        // URL 분석 결과 반영
-        // - 의심 URL이 있으면 최소한 URL 위험도만큼 신뢰도 보장
-        // - 추가로 URL 위험도의 30%를 보너스로 부여
-        // - 이유: URL이 포함된 스캠은 위험도가 높음 (피싱 링크 가능성)
+        // URL 분석 결과 반영 (보너스 15% — Rule 점수 과다 방지)
         if (urlResult.suspiciousUrls.isNotEmpty()) {
             ruleConfidence = max(ruleConfidence, urlResult.riskScore)
-            ruleConfidence += urlResult.riskScore * 0.3f
+            ruleConfidence += urlResult.riskScore * 0.15f
         }
 
-        // 전화번호 분석 결과 반영
-        // - Counter Scam 112 DB에 등록된 번호가 있으면 고위험
-        // - 의심 대역(070, 050)도 위험도에 반영
+        // 전화번호 분석 결과 반영 (DB 등록 15%, 의심 대역만 10%)
         if (phoneResult.hasScamPhones) {
             ruleConfidence = max(ruleConfidence, phoneResult.riskScore)
-            ruleConfidence += phoneResult.riskScore * 0.3f
+            ruleConfidence += phoneResult.riskScore * 0.15f
         } else if (phoneResult.isSuspiciousPrefix) {
-            ruleConfidence += phoneResult.riskScore * 0.2f
+            ruleConfidence += phoneResult.riskScore * 0.1f
         }
 
-        // 계좌번호 분석 결과 반영
-        // - 경찰청 DB에 등록된 사기계좌가 있으면 고위험
+        // 계좌번호 분석 결과 반영 (보너스 15%)
         if (accountResult.hasFraudAccounts) {
             ruleConfidence = max(ruleConfidence, accountResult.riskScore)
-            ruleConfidence += accountResult.riskScore * 0.3f
+            ruleConfidence += accountResult.riskScore * 0.15f
         }
         ruleConfidence = ruleConfidence.coerceIn(0f, 1f)
 
@@ -146,16 +140,14 @@ class HybridScamDetector @Inject constructor(
                     text.contains("송금", ignoreCase = true) ||
                     text.contains("계좌", ignoreCase = true)
 
-            // 스캠 황금 패턴: 긴급성 + 금전 요구 + URL
-            // - 전형적인 피싱 패턴으로 추가 15% 보너스
-            // - 예: "급하게 이 링크로 입금해주세요"
+            // 스캠 황금 패턴: 긴급성 + 금전 요구 + URL (보너스 8%)
             if (hasUrgency && hasMoney && urlResult.urls.isNotEmpty()) {
-                ruleConfidence += 0.15f
+                ruleConfidence += 0.08f
                 combinedReasons.add("의심스러운 조합: 긴급 + 금전 + URL")
             }
         }
-        // 조합 보너스 추가 후에도 1.0 초과 방지
-        ruleConfidence = ruleConfidence.coerceIn(0f, 1f)
+        // Rule 신뢰도 상한 0.65 — LLM 가중 평균(4:6)에서 LLM 기여도가 충분히 반영되도록
+        ruleConfidence = ruleConfidence.coerceIn(0f, 0.65f)
 
         // 9. LLM 분석
         // - 룰 기반 결과 + 키워드/URL/전화번호 신호를 바탕으로 LLM에게 컨텍스트 설명/보조 신뢰도를 요청한다.
@@ -175,20 +167,19 @@ class HybridScamDetector @Inject constructor(
 
         if (shouldUseLLM) {
             DebugLog.debugLog(TAG) {
-                "step=llm_trigger ruleConfidence=$ruleConfidence useLLM=$useLLM llmAvailable=${llmScamDetector.isAvailable()} " +
+                "step=llm_trigger ruleConfidence=$ruleConfidence useLLM=$useLLM llmAvailable=${scamLlmClient.isAvailable()} " +
                         "hasMoneyKeyword=$hasMoneyKeyword hasUrgencyKeyword=$hasUrgencyKeyword hasUrl=$hasUrl " +
                         "hasScamPhone=$hasScamPhone hasScamAccount=$hasScamAccount"
             }
 
-            // PII 마스킹 적용 (전화번호/계좌번호/주민번호 보호)
-            // - AccessibilityService 데이터가 외부 LLM으로 유출되지 않도록 보호
-            // - 전화번호: 부분 마스킹 (010-****-5678) - 대역 정보 유지
-            // - 계좌번호/주민번호: 완전 마스킹 ([계좌번호], [주민번호])
-            val llmResult = llmScamDetector.analyze(
+            // PII 마스킹 적용 (API 직전): 전화번호/계좌번호/주민번호 보호
+            // - originalText, recentContext, currentMessage: PiiMasker.mask 적용
+            // - ruleReasons: PhoneAnalyzer 등에서 raw 전화번호가 들어갈 수 있으므로 항목별 마스킹
+            val request = ScamLlmRequest(
                 originalText = PiiMasker.mask(text),
                 recentContext = PiiMasker.mask(recentContext),
                 currentMessage = PiiMasker.mask(currentMessage),
-                ruleReasons = combinedReasons,
+                ruleReasons = combinedReasons.map { PiiMasker.mask(it) },
                 detectedKeywords = keywordResult.detectedKeywords
             )
 
