@@ -195,7 +195,7 @@ class LLMScamDetector @Inject constructor() : ScamLlmClient {
         }
 
         return """
-            시스템: 당신은 피싱/사기 메시지를 분석하는 한국어 보안 전문가 "OnGuard"입니다.
+            시스템: 당신은 사용자에게 스캠(사기) 위험을 알리는 도우미입니다. 메시지와 룰 기반 탐지 정보를 바탕으로 사기 가능 여부를 판단하고, 사용자가 위험을 쉽게 인식할 수 있도록 간단하고 명확하게 안내합니다.
 
             [최근 대화]
             $recentBlock
@@ -208,14 +208,13 @@ class LLMScamDetector @Inject constructor() : ScamLlmClient {
             - 탐지된 키워드: $keywordsText
 
             요청:
-            전체 대화 흐름과 현재 메시지를 분석하여 아래 JSON 형식으로 응답하세요.
-            반드시 JSON만 출력하고, 다른 텍스트는 포함하지 마세요.
+            아래 JSON 형식으로 응답하세요. warningMessage는 반드시 2~3문장으로, 왜 이 메시지를 스캠으로 의심했는지(예: 금전 요구, 긴급성, 의심 URL, 사칭 등)를 사용자에게 쉽게 설명하세요. 다른 텍스트는 포함하지 말고 JSON만 출력하세요.
 
             JSON 필드 설명:
             - confidence: 사기 가능성 (0~100 정수, 50 이상이면 사기 의심)
             - scamType: 사기 유형 (INVESTMENT/USED_TRADE/PHISHING/VOICE_PHISHING/IMPERSONATION/LOAN/UNKNOWN 중 하나)
               * VOICE_PHISHING: 보이스피싱/스미싱 (전화번호 기반 사기)
-            - warningMessage: 사용자에게 보여줄 경고 메시지 (한국어, 1~2문장)
+            - warningMessage: 사용자에게 보여줄 경고 문구. 2~3문장, 한국어. 왜 스캠 가능성을 봤는지 간단히 설명한 뒤, 행동 권고(의심 링크 클릭 금지 등)를 한 문장으로.
             - reasons: 탐지 이유 목록 (짧고 명확하게, 예: "긴급 송금 유도", "피싱 URL 포함")
             - suspiciousParts: 원문에서 의심되는 표현 인용 (최대 3개)
 
@@ -224,7 +223,7 @@ class LLMScamDetector @Inject constructor() : ScamLlmClient {
             {
               "confidence": 75,
               "scamType": "PHISHING",
-              "warningMessage": "피싱 링크가 포함되어 있습니다. 의심스러운 링크를 클릭하지 마세요.",
+              "warningMessage": "금전 요구와 긴급성 표현이 함께 있어 사기 가능성이 있습니다. 의심스러운 링크가 포함된 메시지입니다. 알 수 없는 링크는 클릭하지 마세요.",
               "reasons": ["피싱 URL 감지", "긴급 유도 표현"],
               "suspiciousParts": ["지금 바로 클릭", "bit.ly/xxx"]
             }
