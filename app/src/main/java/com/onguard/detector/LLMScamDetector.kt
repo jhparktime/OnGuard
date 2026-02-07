@@ -168,6 +168,7 @@ class LLMScamDetector @Inject constructor() : ScamLlmClient {
      *
      * - 최근 대화 줄들과 현재 메시지를 분리해 보여주고,
      * - 룰 기반 탐지 이유/키워드 정보를 함께 전달한다.
+     * - JSON 형식으로 출력하여 파싱 안정성을 높인다.
      */
     private fun buildPrompt(
         recentContextLines: List<String>,
@@ -195,7 +196,7 @@ class LLMScamDetector @Inject constructor() : ScamLlmClient {
 
         return """
             시스템: 당신은 피싱/사기 메시지를 분석하는 한국어 보안 전문가 "OnGuard"입니다.
-            
+
             [최근 대화]
             $recentBlock
 
@@ -207,14 +208,27 @@ class LLMScamDetector @Inject constructor() : ScamLlmClient {
             - 탐지된 키워드: $keywordsText
 
             요청:
-            1. 전체 대화 흐름과 현재 메시지를 모두 보고, 이 대화가 사기/피싱일 가능성이 어느 정도인지 "높음/중간/낮음" 중 하나로 판단하세요.
-            2. 왜 그렇게 판단했는지 한국어로 2~3문장 정도로 설명하세요. 이전 대화에서 어떤 내용이 있었는지도 함께 언급하세요.
-            3. 특히 위험한 표현이나 패턴이 있으면 따옴표로 인용해서 알려주세요.
+            전체 대화 흐름과 현재 메시지를 분석하여 아래 JSON 형식으로 응답하세요.
+            반드시 JSON만 출력하고, 다른 텍스트는 포함하지 마세요.
+
+            JSON 필드 설명:
+            - confidence: 사기 가능성 (0~100 정수, 50 이상이면 사기 의심)
+            - scamType: 사기 유형 (INVESTMENT/USED_TRADE/PHISHING/VOICE_PHISHING/IMPERSONATION/LOAN/UNKNOWN 중 하나)
+              * VOICE_PHISHING: 보이스피싱/스미싱 (전화번호 기반 사기)
+            - warningMessage: 사용자에게 보여줄 경고 메시지 (한국어, 1~2문장)
+            - reasons: 탐지 이유 목록 (짧고 명확하게, 예: "긴급 송금 유도", "피싱 URL 포함")
+            - suspiciousParts: 원문에서 의심되는 표현 인용 (최대 3개)
 
             출력 형식:
-            [위험도: 높음/중간/낮음]
-            설명: ...
-            위험 패턴: "표현1", "표현2"
+            ```json
+            {
+              "confidence": 75,
+              "scamType": "PHISHING",
+              "warningMessage": "피싱 링크가 포함되어 있습니다. 의심스러운 링크를 클릭하지 마세요.",
+              "reasons": ["피싱 URL 감지", "긴급 유도 표현"],
+              "suspiciousParts": ["지금 바로 클릭", "bit.ly/xxx"]
+            }
+            ```
         """.trimIndent()
     }
 
@@ -293,12 +307,137 @@ class LLMScamDetector @Inject constructor() : ScamLlmClient {
     /**
      * Gemini 응답 텍스트를 [ScamAnalysis]로 변환한다.
      *
+     * 예상 형식 (JSON):
+     * ```json
+     * {
+     *   "confidence": 75,
+     *   "scamType": "PHISHING",
+     *   "warningMessage": "...",
+     *   "reasons": ["...", "..."],
+     *   "suspiciousParts": ["...", "..."]
+     * }
+     * ```
+     *
+     * JSON 파싱 실패 시 기존 자연어 파싱으로 폴백한다.
+     */
+    private fun parseGeminiResponse(
+        response: String,
+        originalText: String,
+        recentContext: String
+    ): ScamAnalysis? {
+        // JSON 블록 추출 (```json ... ``` 또는 { ... })
+        val jsonString = extractJsonFromResponse(response)
+
+        if (jsonString != null) {
+            try {
+                val json = JSONObject(jsonString)
+                return parseJsonResponse(json, originalText, recentContext)
+            } catch (e: Exception) {
+                DebugLog.warnLog(TAG) { "step=parse_json failed error=${e.message}" }
+            }
+        }
+
+        // JSON 파싱 실패 시 기존 자연어 파싱으로 폴백
+        return parseLegacyResponse(response, originalText, recentContext)
+    }
+
+    /**
+     * 응답 텍스트에서 JSON 블록을 추출한다.
+     */
+    private fun extractJsonFromResponse(response: String): String? {
+        // 1. ```json ... ``` 형식 추출
+        val codeBlockRegex = Regex("""```json\s*\n?([\s\S]*?)\n?```""", RegexOption.IGNORE_CASE)
+        codeBlockRegex.find(response)?.let {
+            return it.groupValues[1].trim()
+        }
+
+        // 2. { ... } 형식 직접 추출
+        val jsonRegex = Regex("""\{[\s\S]*\}""")
+        jsonRegex.find(response)?.let {
+            return it.value.trim()
+        }
+
+        return null
+    }
+
+    /**
+     * JSON 객체를 [ScamAnalysis]로 변환한다.
+     */
+    private fun parseJsonResponse(
+        json: JSONObject,
+        originalText: String,
+        recentContext: String
+    ): ScamAnalysis {
+        // confidence: 0~100 → 0.0~1.0
+        val confidenceInt = json.optInt("confidence", 50)
+        val confidence = (confidenceInt / 100f).coerceIn(0f, 1f)
+
+        // scamType
+        val scamTypeStr = json.optString("scamType", "UNKNOWN")
+        val scamType = try {
+            ScamType.valueOf(scamTypeStr)
+        } catch (e: Exception) {
+            inferScamType("${recentContext.ifBlank { originalText }}")
+        }
+
+        // warningMessage
+        val warningMessage = json.optString("warningMessage", "").ifBlank {
+            generateDefaultWarning(scamType, confidence)
+        }
+
+        // reasons
+        val reasonsArray = json.optJSONArray("reasons")
+        val reasons = mutableListOf<String>()
+        if (reasonsArray != null) {
+            for (i in 0 until reasonsArray.length()) {
+                reasonsArray.optString(i)?.takeIf { it.isNotBlank() }?.let {
+                    reasons.add(it)
+                }
+            }
+        }
+        if (reasons.isEmpty()) {
+            reasons.add("LLM 분석 결과")
+        }
+
+        // suspiciousParts
+        val suspiciousArray = json.optJSONArray("suspiciousParts")
+        val suspiciousParts = mutableListOf<String>()
+        if (suspiciousArray != null) {
+            for (i in 0 until suspiciousArray.length()) {
+                suspiciousArray.optString(i)?.takeIf { it.isNotBlank() }?.let {
+                    suspiciousParts.add(it)
+                }
+            }
+        }
+
+        val isScam = confidence >= 0.5f
+
+        DebugLog.debugLog(TAG) {
+            "step=parse_json confidence=$confidence scamType=$scamType isScam=$isScam " +
+                    "reasons=${reasons.size} suspiciousParts=${suspiciousParts.size}"
+        }
+
+        return ScamAnalysis(
+            isScam = isScam,
+            confidence = confidence,
+            reasons = reasons,
+            detectedKeywords = emptyList(),
+            detectionMethod = DetectionMethod.LLM,
+            scamType = scamType,
+            warningMessage = warningMessage,
+            suspiciousParts = suspiciousParts
+        )
+    }
+
+    /**
+     * 기존 자연어 형식 응답을 파싱한다 (폴백용).
+     *
      * 예상 형식:
      * [위험도: 높음/중간/낮음]
      * 설명: ...
      * 위험 패턴: "표현1", "표현2"
      */
-    private fun parseGeminiResponse(
+    private fun parseLegacyResponse(
         response: String,
         originalText: String,
         recentContext: String
@@ -328,7 +467,6 @@ class LLMScamDetector @Inject constructor() : ScamLlmClient {
             ?.trim()
             ?.takeIf { it.isNotBlank() }
             ?: run {
-                // 설명이 없으면 최근 대화의 마지막 몇 줄을 마스킹해 기본 설명으로 사용
                 val recentLines = recentContext.lines().map { it.trim() }.filter { it.isNotBlank() }
                 val fallbackContext = if (recentLines.isNotEmpty()) {
                     recentLines.takeLast(3).joinToString(" / ")
@@ -345,11 +483,15 @@ class LLMScamDetector @Inject constructor() : ScamLlmClient {
             ?.filter { it.isNotBlank() }
             ?: emptyList()
 
-        val reasons = listOf("LLM 평가: 위험도=$risk, 설명: $description")
+        val reasons = listOf("LLM 평가: 위험도=$risk")
 
         val scamType = inferScamType("${recentContext.ifBlank { originalText }} $description")
 
-        val analysis = ScamAnalysis(
+        DebugLog.debugLog(TAG) {
+            "step=parse_legacy risk=$risk isScam=$isScam confidence=$confidence scamType=$scamType"
+        }
+
+        return ScamAnalysis(
             isScam = isScam,
             confidence = confidence,
             reasons = reasons,
@@ -359,12 +501,22 @@ class LLMScamDetector @Inject constructor() : ScamLlmClient {
             warningMessage = description,
             suspiciousParts = suspiciousParts
         )
+    }
 
-        DebugLog.debugLog(TAG) {
-            "step=parse risk=$risk isScam=$isScam confidence=$confidence scamType=$scamType suspiciousParts=${suspiciousParts.size}"
+    /**
+     * 스캠 유형에 따른 기본 경고 메시지를 생성한다.
+     */
+    private fun generateDefaultWarning(scamType: ScamType, confidence: Float): String {
+        val percent = (confidence * 100).toInt()
+        return when (scamType) {
+            ScamType.INVESTMENT -> "투자 사기가 의심됩니다 (위험도 $percent%). 고수익 보장 투자는 대부분 사기입니다."
+            ScamType.USED_TRADE -> "중고거래 사기가 의심됩니다 (위험도 $percent%). 선입금 요구 시 직거래하세요."
+            ScamType.PHISHING -> "피싱 링크가 포함되어 있습니다 (위험도 $percent%). 의심스러운 링크를 클릭하지 마세요."
+            ScamType.VOICE_PHISHING -> "이 전화번호는 보이스피싱/스미싱 신고 이력이 있습니다 (위험도 $percent%). 금전 요구에 응하지 마세요."
+            ScamType.IMPERSONATION -> "사칭 사기가 의심됩니다 (위험도 $percent%). 공식 채널을 통해 확인하세요."
+            ScamType.LOAN -> "대출 사기가 의심됩니다 (위험도 $percent%). 선수수료 요구는 불법입니다."
+            else -> "사기 의심 메시지입니다 (위험도 $percent%). 주의하세요."
         }
-
-        return analysis
     }
 
     /**
@@ -372,6 +524,10 @@ class LLMScamDetector @Inject constructor() : ScamLlmClient {
      */
     private fun inferScamType(text: String): ScamType {
         return when {
+            // 보이스피싱/스미싱 (전화번호 기반) - 가장 먼저 체크
+            text.contains("보이스피싱") || text.contains("스미싱") ||
+                text.contains("전화번호") || text.contains("신고 이력") -> ScamType.VOICE_PHISHING
+
             text.contains("투자") || text.contains("수익") ||
                 text.contains("코인") || text.contains("주식") -> ScamType.INVESTMENT
 

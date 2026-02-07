@@ -101,3 +101,5 @@ app/src/main/assets/tokenizers/smollm2/model.safetensors
 # Local build scripts (user-specific JDK paths)
 build_with_*.bat
 build_with_*.sh
+
+/[Nn]o[Gg]it/

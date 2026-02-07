@@ -1,52 +1,48 @@
 package com.onguard.presentation.ui.main
 
-import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
-import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.onguard.domain.model.ScamAlert
-import com.onguard.presentation.ui.theme.OnGuardTheme
-import com.onguard.presentation.viewmodel.MainUiState
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.core.view.WindowCompat
+import com.onguard.presentation.theme.OnGuardTheme // 1단계에서 옮긴 테마 패키지
+import com.onguard.presentation.ui.dashboard.DashboardScreen
 import com.onguard.presentation.viewmodel.MainViewModel
+import com.onguard.presentation.ui.settings.SettingsActivity
 import dagger.hilt.android.AndroidEntryPoint
-import java.text.SimpleDateFormat
-import java.util.*
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
+    // ViewModel 주입
+    private val viewModel: MainViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Edge-to-Edge 활성화 (상단바까지 콘텐츠 확장)
+        enableEdgeToEdge()
+        
+        // 시스템 바 투명하게 설정
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        
+        // 여기에 권한 체크 로직이나 서비스 시작 로직 등은 유지 (필요 시)
+
         setContent {
+            // 우리가 만든 앱 테마 적용
             OnGuardTheme {
-                MainScreen()
+                // ViewModel의 StateFlow를 Compose State로 변환
+                val uiState by viewModel.uiState.collectAsState()
+                
+                // 새로운 대시보드 화면에 데이터(State) 주입
+                DashboardScreen(state = uiState)
             }
         }
     }
+}
 
     override fun onResume() {
         super.onResume()
@@ -100,7 +96,10 @@ fun MainScreen(
                 ),
                 actions = {
                     IconButton(
-                        onClick = { /* TODO: SettingsActivity 호출 */ },
+                        onClick = {
+                            val intent = Intent(context, SettingsActivity::class.java)
+                            context.startActivity(intent)
+                        },
                         modifier = Modifier.semantics {
                             contentDescription = "설정"
                         }

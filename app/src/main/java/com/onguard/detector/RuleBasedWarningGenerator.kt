@@ -21,6 +21,9 @@ object RuleBasedWarningGenerator {
             ScamType.PHISHING ->
                 "피싱 링크가 포함되어 있습니다 (위험도 $confidencePercent%). 의심스러운 링크를 클릭하지 마세요."
 
+            ScamType.VOICE_PHISHING ->
+                "이 전화번호는 보이스피싱/스미싱 신고 이력이 있습니다 (위험도 $confidencePercent%). 절대 금전 요구에 응하지 마세요."
+
             ScamType.IMPERSONATION ->
                 "사칭 사기가 의심됩니다 (위험도 $confidencePercent%). 공식 채널을 통해 확인하세요."
 

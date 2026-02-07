@@ -4,6 +4,144 @@
 
 ---
 
+## [0.4.1] - 2026-02-07
+
+### Added
+- **ScamType.VOICE_PHISHING 추가** (P1)
+  - 보이스피싱/스미싱 전용 스캠 유형 신설
+  - Counter Scam 112 API 탐지 결과를 적절히 분류
+
+### Changed
+
+#### LLMScamDetector.kt - JSON 출력 형식 도입
+- **프롬프트 출력 형식 변경**: 자연어 → JSON
+  - 기존: `[위험도: 높음/중간/낮음]` + `설명:` + `위험 패턴:`
+  - 변경: `{"confidence": 75, "scamType": "PHISHING", ...}`
+- **파싱 안정성 향상**
+  - `extractJsonFromResponse()`: ` ```json ``` ` 또는 `{ }` 형식 추출
+  - `parseJsonResponse()`: JSON 객체 파싱
+  - `parseLegacyResponse()`: 기존 형식 폴백 유지
+- **confidence 정밀도 개선**: 높음/중간/낮음 (3단계) → 0~100 숫자
+- **scamType 직접 분류**: LLM이 직접 VOICE_PHISHING 포함 7개 유형 분류
+
+#### PhoneAnalyzer.kt - 전화번호 패턴 수정
+- **서울 지역번호 (02) 패턴 추가** (기존 누락)
+  - 기존: `0[2-6][0-9]-?...` (3자리만 인식)
+  - 수정: `02-?\d{3,4}-?\d{4}` (2자리 02 인식)
+- **대표번호 확장**
+  - 기존: `1[56][0-9]{2}` (15XX, 16XX)
+  - 수정: `1[5689][0-9]{2}` (18XX, 19XX 추가, 1899 등)
+- **050 번호 패턴 확장**: `050[0-9]` (0500~0509)
+
+#### ScamTypeInferrer.kt
+- **전화번호 관련 키워드 추가**
+  - "보이스피싱", "스미싱", "Counter Scam", "전화번호", "신고 이력"
+  - 위 키워드 포함 시 `ScamType.VOICE_PHISHING`으로 분류
+
+#### RuleBasedWarningGenerator.kt
+- **VOICE_PHISHING 경고 메시지 추가**
+  - "이 전화번호는 보이스피싱/스미싱 신고 이력이 있습니다"
+
+#### OverlayService.kt
+- **VOICE_PHISHING 라벨 추가**
+  - `getScamTypeLabel()`: "보이스피싱 의심"
+  - `generateDefaultWarning()`: 보이스피싱 경고 문구
+
+### Technical Details
+- **LLM 출력 일관성**: Rule-based와 LLM 결과가 동일한 ScamAnalysis 구조로 반환
+- **전화번호 인식률 향상**: 02-XXXX-XXXX, 1899-XXXX 등 누락 패턴 수정
+
+### Test Scenarios
+```
+✅ 010-1234-5678  → 인식 → API 조회
+✅ 02-1234-5678   → 인식 → API 조회 (수정됨)
+✅ 0212345678     → 인식 → API 조회 (수정됨)
+✅ 1899-1234      → 인식 → API 조회 (수정됨)
+✅ Counter Scam 탐지 → ScamType.VOICE_PHISHING → "보이스피싱 의심" 표시
+```
+
+---
+
+## [0.4.0] - 2026-02-06
+
+### Added
+- **Counter Scam 112 전화번호 조회 API 통합** (P0)
+  - 전기통신금융사기 통합대응단 API 연동
+  - 전화번호의 보이스피싱/스미싱 신고 이력 실시간 조회
+  - 세션 쿠키 자동 관리 (CookieJar)
+
+#### 신규 파일
+
+| 파일 | 위치 | 설명 |
+|------|------|------|
+| `CounterScam112Api.kt` | `data/remote/api/` | Retrofit API 인터페이스 |
+| `CounterScamDto.kt` | `data/remote/dto/` | Request/Response DTO |
+| `CounterScamRepository.kt` | `domain/repository/` | Repository 인터페이스 |
+| `CounterScamRepositoryImpl.kt` | `data/repository/` | LRU 캐시 포함 구현체 |
+| `PhoneAnalysisResult.kt` | `domain/model/` | 분석 결과 모델 |
+| `PhoneAnalyzer.kt` | `detector/` | 전화번호 분석기 |
+
+#### CounterScam112Api.kt
+- **세션 초기화**: `initSession()` - GET으로 JSESSIONID 획득
+- **전화번호 조회**: `searchPhone()` - POST JSON 방식
+- 엔드포인트: `/main/voiceNumSearchAjax.do`
+
+#### CounterScamRepositoryImpl.kt
+- **LRU 캐시**: 100개 항목, 15분 TTL
+- **세션 관리**: 30분 TTL, 자동 재초기화
+- **Graceful Degradation**: API 실패 시 빈 결과 반환
+
+#### PhoneAnalyzer.kt
+- **전화번호 추출**: 한국 전화번호 패턴 6종
+  - 휴대폰 (010, 011, 016, 017, 018, 019)
+  - 지역번호 (02, 031~064)
+  - 대표번호 (1588, 1566 등)
+  - 인터넷전화 (070)
+  - 050 번호
+  - 국제번호 (+82)
+- **위험도 점수**:
+  - DB 등록: 0.9f
+  - 보이스피싱 이력: +0.21f
+  - 스미싱 이력: +0.18f
+  - 다수 신고 (5건+): +0.3f
+  - 의심 대역 (070/050): 0.2f
+
+### Changed
+
+#### NetworkModule.kt
+- **Counter Scam 112 전용 DI 추가**
+  - `@CounterScamRetrofit` Qualifier
+  - `@CounterScamOkHttp` Qualifier
+  - CookieJar 기반 세션 쿠키 자동 관리
+  - JSON Content-Type 인터셉터
+
+#### HybridScamDetector.kt
+- **PhoneAnalyzer 통합**
+  - 생성자에 PhoneAnalyzer 추가
+  - 전화번호 분석 결과 신뢰도 반영
+  - LLM 트리거 조건에 `hasScamPhone` 추가
+
+### Technical Details
+- **API 엔드포인트 발견**:
+  - 잘못된 경로: `/phishing/searchPhone.do` (Form-urlencoded)
+  - 올바른 경로: `/main/voiceNumSearchAjax.do` (JSON)
+- **세션 관리**: CookieJar로 JSESSIONID 자동 저장/전송
+- **테스트 결과**: `01012345678` 조회 시 `totCnt=6, smsCnt=6` 반환 확인
+- **빌드**: JDK 17/21 필요 (JDK 25 비호환)
+
+### API Response Example
+```json
+{
+  "totCnt": 6,
+  "voiceCnt": 0,
+  "smsCnt": 6,
+  "smsList": [{"dclrCn": "..."}],
+  "searchData": "최근 3개월 2025.11.06 ~ 2026.02.06"
+}
+```
+
+---
+
 ## [0.3.0] - 2026-02-06
 
 ### Added
