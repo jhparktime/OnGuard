@@ -38,7 +38,16 @@ data class DetectionSettings(
     val pauseUntilTimestamp: Long = 0L,
 
     /** 비활성화된 앱 패키지 목록 */
-    val disabledApps: Set<String> = emptySet()
+    val disabledApps: Set<String> = emptySet(),
+
+    /** 현재 세션 시작/재개 시각 (epoch ms), 0이면 정지/일시정지 */
+    val detectionStartTime: Long = 0L,
+
+    /** 현재 세션 누적 시간 (밀리초) - 일시정지 때마다 누적됨 */
+    val sessionAccumulatedTime: Long = 0L,
+
+    /** 전체 누적 탐지 시간 (밀리초) - 대시보드 표시용 */
+    val totalAccumulatedTime: Long = 0L
 ) {
     /**
      * 현재 탐지가 활성 상태인지 확인
@@ -83,6 +92,9 @@ class DetectionSettingsDataStore @Inject constructor(
         private val KEY_DETECTION_ENABLED = booleanPreferencesKey("detection_enabled")
         private val KEY_PAUSE_UNTIL = longPreferencesKey("pause_until_timestamp")
         private val KEY_DISABLED_APPS = stringSetPreferencesKey("disabled_apps")
+        private val KEY_DETECTION_START_TIME = longPreferencesKey("detection_start_time")
+        private val KEY_SESSION_ACCUMULATED_TIME = longPreferencesKey("session_accumulated_time")
+        private val KEY_TOTAL_ACCUMULATED_TIME = longPreferencesKey("total_accumulated_time")
     }
 
     /**
@@ -92,7 +104,10 @@ class DetectionSettingsDataStore @Inject constructor(
         DetectionSettings(
             isDetectionEnabled = preferences[KEY_DETECTION_ENABLED] ?: true,
             pauseUntilTimestamp = preferences[KEY_PAUSE_UNTIL] ?: 0L,
-            disabledApps = preferences[KEY_DISABLED_APPS] ?: emptySet()
+            disabledApps = preferences[KEY_DISABLED_APPS] ?: emptySet(),
+            detectionStartTime = preferences[KEY_DETECTION_START_TIME] ?: 0L,
+            sessionAccumulatedTime = preferences[KEY_SESSION_ACCUMULATED_TIME] ?: 0L,
+            totalAccumulatedTime = preferences[KEY_TOTAL_ACCUMULATED_TIME] ?: 0L
         )
     }
 
@@ -102,8 +117,24 @@ class DetectionSettingsDataStore @Inject constructor(
     suspend fun setDetectionEnabled(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[KEY_DETECTION_ENABLED] = enabled
-            // 활성화 시 일시 중지 해제
+            val now = System.currentTimeMillis()
+            
             if (enabled) {
+                // 활성화 시: 시작 시간 기록, 일시 정지 해제 (세션 시간은 0에서 시작)
+                preferences[KEY_PAUSE_UNTIL] = 0L
+                preferences[KEY_DETECTION_START_TIME] = now
+                preferences[KEY_SESSION_ACCUMULATED_TIME] = 0L
+            } else {
+                // 비활성화 시 (완전 정지): 마지막 구간 시간 누적 후 리셋
+                val startTime = preferences[KEY_DETECTION_START_TIME] ?: 0L
+                if (startTime > 0) {
+                    val diff = now - startTime
+                    val total = preferences[KEY_TOTAL_ACCUMULATED_TIME] ?: 0L
+                    preferences[KEY_TOTAL_ACCUMULATED_TIME] = total + diff
+                }
+                // 세션 및 시작 시간 리셋
+                preferences[KEY_DETECTION_START_TIME] = 0L
+                preferences[KEY_SESSION_ACCUMULATED_TIME] = 0L
                 preferences[KEY_PAUSE_UNTIL] = 0L
             }
         }
@@ -116,8 +147,27 @@ class DetectionSettingsDataStore @Inject constructor(
      */
     suspend fun pauseDetection(durationMinutes: Int) {
         dataStore.edit { preferences ->
+            val now = System.currentTimeMillis()
+            
+            // 일시 중지 시작: 현재까지의 시간 누적 처리
+            val startTime = preferences[KEY_DETECTION_START_TIME] ?: 0L
+            if (startTime > 0) {
+                val diff = now - startTime
+                
+                // 세션 누적
+                val sessionAcc = preferences[KEY_SESSION_ACCUMULATED_TIME] ?: 0L
+                preferences[KEY_SESSION_ACCUMULATED_TIME] = sessionAcc + diff
+                
+                // 전체 누적
+                val totalAcc = preferences[KEY_TOTAL_ACCUMULATED_TIME] ?: 0L
+                preferences[KEY_TOTAL_ACCUMULATED_TIME] = totalAcc + diff
+                
+                // 타이머 정지 상태로 변경
+                preferences[KEY_DETECTION_START_TIME] = 0L
+            }
+
             if (durationMinutes > 0) {
-                val pauseUntil = System.currentTimeMillis() + (durationMinutes * 60 * 1000L)
+                val pauseUntil = now + (durationMinutes * 60 * 1000L)
                 preferences[KEY_PAUSE_UNTIL] = pauseUntil
             } else {
                 preferences[KEY_PAUSE_UNTIL] = 0L
@@ -131,6 +181,8 @@ class DetectionSettingsDataStore @Inject constructor(
     suspend fun resumeDetection() {
         dataStore.edit { preferences ->
             preferences[KEY_PAUSE_UNTIL] = 0L
+            // 재개 시 타이머 다시 시작
+            preferences[KEY_DETECTION_START_TIME] = System.currentTimeMillis()
         }
     }
 
@@ -154,6 +206,16 @@ class DetectionSettingsDataStore @Inject constructor(
     suspend fun enableAllApps() {
         dataStore.edit { preferences ->
             preferences[KEY_DISABLED_APPS] = emptySet()
+        }
+    }
+
+    /**
+     * 여러 앱 탐지 일괄 활성화
+     */
+    suspend fun enableApps(packageNames: Collection<String>) {
+        dataStore.edit { preferences ->
+            val currentDisabled = preferences[KEY_DISABLED_APPS] ?: emptySet()
+            preferences[KEY_DISABLED_APPS] = currentDisabled - packageNames.toSet()
         }
     }
 }

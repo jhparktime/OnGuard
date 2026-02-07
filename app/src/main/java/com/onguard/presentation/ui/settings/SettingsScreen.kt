@@ -3,6 +3,8 @@ package com.onguard.presentation.ui.settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,11 +17,27 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import java.util.concurrent.TimeUnit
+import com.onguard.presentation.theme.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.window.Dialog
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.draw.shadow
+import kotlinx.coroutines.delay
 
 /**
  * 모니터링 대상 앱 목록
@@ -27,20 +45,26 @@ import java.util.concurrent.TimeUnit
 data class MonitoredApp(
     val packageName: String,
     val displayName: String,
-    val icon: ImageVector
+    val icon: ImageVector,
+    val category: String
 )
 
 private val monitoredApps = listOf(
-    MonitoredApp("com.kakao.talk", "카카오톡", Icons.Default.Chat),
-    MonitoredApp("org.telegram.messenger", "텔레그램", Icons.Default.Send),
-    MonitoredApp("com.whatsapp", "왓츠앱", Icons.Default.Phone),
-    MonitoredApp("com.facebook.orca", "페이스북 메신저", Icons.Default.Message),
-    MonitoredApp("com.instagram.android", "인스타그램", Icons.Default.CameraAlt),
-    MonitoredApp("kr.co.daangn", "당근마켓", Icons.Default.ShoppingCart),
-    MonitoredApp("jp.naver.line.android", "라인", Icons.Default.Chat),
-    MonitoredApp("com.discord", "디스코드", Icons.Default.Headphones),
-    MonitoredApp("com.google.android.apps.messaging", "Google 메시지", Icons.Default.Sms),
-    MonitoredApp("com.samsung.android.messaging", "삼성 메시지", Icons.Default.Sms)
+    // 메신저
+    MonitoredApp("com.kakao.talk", "카카오톡", Icons.Default.Chat, "메신저"),
+    MonitoredApp("org.telegram.messenger", "텔레그램", Icons.Default.Send, "메신저"),
+    MonitoredApp("jp.naver.line.android", "라인", Icons.Default.Chat, "메신저"),
+    MonitoredApp("com.facebook.orca", "페이스북 메신저", Icons.Default.Message, "메신저"),
+    MonitoredApp("com.google.android.apps.messaging", "Google 메시지", Icons.Default.Sms, "메신저"),
+    MonitoredApp("com.samsung.android.messaging", "삼성 메시지", Icons.Default.Sms, "메신저"),
+    MonitoredApp("com.instagram.android", "인스타그램 DM", Icons.Default.Send, "메신저"),
+    
+    // 통화
+    MonitoredApp("com.whatsapp", "왓츠앱", Icons.Default.Phone, "통화"),
+    MonitoredApp("com.discord", "디스코드", Icons.Default.Headphones, "통화"),
+    
+    // 중고거래
+    MonitoredApp("kr.co.daangn", "당근마켓", Icons.Default.ShoppingCart, "중고거래")
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -52,6 +76,20 @@ fun SettingsScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     Scaffold(
+        modifier = Modifier.pointerInput(Unit) {
+             var totalDrag = 0f
+             detectHorizontalDragGestures(
+                 onDragStart = { totalDrag = 0f },
+                 onDragEnd = {
+                     if (totalDrag > 150f) { // 오른쪽으로 충분히 스와이프
+                         onBackClick()
+                     }
+                 }
+             ) { change, dragAmount ->
+                 totalDrag += dragAmount
+             }
+        },
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = { Text("설정", fontWeight = FontWeight.Bold) },
@@ -61,10 +99,14 @@ fun SettingsScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onBackground,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
+                    actionIconContentColor = MaterialTheme.colorScheme.onBackground
                 )
             )
-        }
+        },
+        contentWindowInsets = WindowInsets.systemBars
     ) { paddingValues ->
         if (uiState.isLoading) {
             Box(
@@ -80,21 +122,70 @@ fun SettingsScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .padding(horizontal = 16.dp),
+                    .padding(horizontal = 16.dp)
+                    // 시스템 바 영역만큼 패딩 추가 (contentWindowInsets를 0으로 설정했으므로 수동 처리 필요할 수 있음)
+                    // 하지만 Scaffold의 paddingValues가 insets를 포함하므로 paddingValues 사용하면 됨
+                    // 다만 WindowInsets(0)으로 설정하면 paddingValues에 systemBar inset이 포함되지 않음.
+                    // 따라서 WindowInsets.systemBars를 사용하거나,
+                    // 배경만 확장하고 컨텐츠는 안전 영역에 두려면 Scaffold defaults가 맞음.
+                    
+                    // 사용자의 요청: "배경이 상단바전체와 하단 전체를 덮도록"
+                    // -> Scaffold의 containerColor가 시스템 바 뒤까지 그려져야 함.
+                    // -> enableEdgeToEdge()는 이미 적용됨.
+                    // -> Scaffold의 containerColor는 기본적으로 전체를 채움.
+                    // -> TopAppBar가 투명이면 됨.
+                    // -> 하지만 contentWindowInsets = WindowInsets(0)을 하면 TopAppBar가 status bar와 겹치게 됨.
+                    // -> 그리고 paddingValues는 0이 됨 (topBar 높이 제외).
+                    
+                    // 수정: contentWindowInsets는 삭제 (기본값 사용)하고 TopAppBar만 투명하게 하거나,
+                    // 배경색을 명시적으로 지정.
+                ,
                 verticalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(vertical = 16.dp)
+                contentPadding = PaddingValues(
+                    top = 16.dp, 
+                    bottom = WindowInsets.systemBars.asPaddingValues().calculateBottomPadding() + 16.dp,
+                    start = 0.dp,
+                    end = 0.dp
+                ) // 하단 네비게이션 바 고려
             ) {
                 // 전역 탐지 설정
                 item {
                     GlobalDetectionCard(
                         isEnabled = uiState.settings.isDetectionEnabled,
-                        isPaused = uiState.settings.remainingPauseTime() > 0,
+                        isPaused = !uiState.settings.isActiveNow() && uiState.settings.remainingPauseTime() > 0,
                         remainingPauseTime = uiState.settings.remainingPauseTime(),
-                        onToggle = { viewModel.setDetectionEnabled(it) },
+                        detectionStartTime = uiState.settings.detectionStartTime,
+                        sessionAccumulatedTime = uiState.settings.sessionAccumulatedTime,
+                        onToggle = viewModel::setDetectionEnabled,
                         onPauseClick = { viewModel.showPauseDialog() },
                         onResumeClick = { viewModel.resumeDetection() }
                     )
                 }
+
+                // 권한 상태 섹션
+                item {
+                    Text(
+                        text = "권한 상태",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.padding(top = 16.dp)
+                    )
+                    Text(
+                        text = "앱이 정상 작동하려면 아래 권한이 필요합니다",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                item {
+                    PermissionsCard(
+                        isAccessibilityEnabled = uiState.isAccessibilityEnabled,
+                        isOverlayEnabled = uiState.isOverlayEnabled,
+                        onRefresh = { viewModel.checkPermissions() }
+                    )
+                }
+
 
                 // 섹션 헤더
                 item {
@@ -102,6 +193,7 @@ fun SettingsScreen(
                         text = "앱별 탐지 설정",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier.padding(top = 8.dp)
                     )
                     Text(
@@ -118,12 +210,15 @@ fun SettingsScreen(
                         onAppToggle = { packageName, enabled ->
                             viewModel.setAppEnabled(packageName, enabled)
                         },
-                        onEnableAll = { viewModel.enableAllApps() }
+                        onEnableAll = viewModel::enableAllApps,
+                        onEnableApps = viewModel::enableApps
                     )
+                }
+
                 }
             }
         }
-    }
+
 
     // 일시 중지 다이얼로그
     if (uiState.showPauseDialog) {
@@ -135,22 +230,75 @@ fun SettingsScreen(
 }
 
 @Composable
+fun ModernSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val trackColor by animateColorAsState(
+        targetValue = if (checked) Color(0xFF34C759) else Color(0xFFE9E9EA), // iOS Green : iOS Gray
+        label = "trackColor"
+    )
+    
+    val thumbOffset by animateDpAsState(
+        targetValue = if (checked) 22.dp else 2.dp,
+        label = "thumbOffset"
+    )
+
+    Box(
+        modifier = modifier
+            .width(51.dp)
+            .height(31.dp)
+            .clip(RoundedCornerShape(100))
+            .background(trackColor)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onCheckedChange(!checked) }
+    ) {
+        Box(
+            modifier = Modifier
+                .size(27.dp)
+                .offset(x = thumbOffset)
+                .align(Alignment.CenterStart)
+                .shadow(elevation = 2.dp, shape = CircleShape)
+                .background(Color.White, CircleShape)
+        )
+    }
+}
+
+@Composable
 fun GlobalDetectionCard(
     isEnabled: Boolean,
     isPaused: Boolean,
     remainingPauseTime: Long,
+    detectionStartTime: Long,
+    sessionAccumulatedTime: Long,
     onToggle: (Boolean) -> Unit,
     onPauseClick: () -> Unit,
     onResumeClick: () -> Unit
 ) {
+    // 세션 타이머 상태
+    var currentSessionTime by remember { mutableLongStateOf(sessionAccumulatedTime) }
+
+    // 타이머 갱신 로직
+    LaunchedEffect(isEnabled, isPaused, detectionStartTime, sessionAccumulatedTime) {
+        if (isEnabled && !isPaused && detectionStartTime > 0) {
+            while (true) {
+                val now = System.currentTimeMillis()
+                currentSessionTime = sessionAccumulatedTime + (now - detectionStartTime)
+                delay(1000L) // 1초마다 갱신
+            }
+        } else {
+            // 정지 또는 일시정지 상태에서는 누적된 시간만 표시
+            currentSessionTime = sessionAccumulatedTime
+        }
+    }
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isEnabled && !isPaused)
-                MaterialTheme.colorScheme.primaryContainer
-            else
-                MaterialTheme.colorScheme.surfaceVariant
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
         )
     ) {
         Column(
@@ -164,40 +312,116 @@ fun GlobalDetectionCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = if (isEnabled && !isPaused)
-                            Icons.Default.Shield
-                        else
-                            Icons.Default.ShieldMoon,
-                        contentDescription = null,
-                        modifier = Modifier.size(28.dp),
-                        tint = if (isEnabled && !isPaused)
-                            MaterialTheme.colorScheme.primary
-                        else
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isEnabled && !isPaused) Color(0xFF34C759).copy(alpha = 0.1f)
+                                else Color(0xFFE53935).copy(alpha = 0.1f)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isEnabled && !isPaused)
+                                Icons.Default.Shield
+                            else
+                                Icons.Default.ShieldMoon,
+                            contentDescription = null,
+                            modifier = Modifier.size(24.dp),
+                            tint = if (isEnabled && !isPaused)
+                                Color(0xFF34C759)
+                            else
+                                Color(0xFFE53935)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
                     Column {
                         Text(
                             text = "스캠 탐지",
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = when {
                                 !isEnabled -> "비활성화됨"
                                 isPaused -> "일시 중지됨"
-                                else -> "활성화됨"
+                                else -> "탐지 중: ${formatDuration(currentSessionTime)}"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
-                Switch(
-                    checked = isEnabled,
-                    onCheckedChange = onToggle
-                )
+                if (!isEnabled || isPaused) {
+                    // 재생 버튼 (활성화 또는 재개)
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.height(48.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    if (isPaused) onResumeClick()
+                                    else onToggle(true)
+                                },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "활성화",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    // 정지 및 일시정지 버튼 그룹
+                    Surface(
+                        shape = RoundedCornerShape(50), // 완전 둥근 형태 (Pill shape)
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.height(48.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            // 일시정지 버튼
+                            IconButton(
+                                onClick = onPauseClick,
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Pause,
+                                    contentDescription = "일시정지",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                            
+                            // 정지 버튼 (비활성화)
+                            IconButton(
+                                onClick = { onToggle(false) },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Stop,
+                                    contentDescription = "비활성화",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             // 일시 중지 상태 표시
@@ -205,8 +429,9 @@ fun GlobalDetectionCard(
                 Spacer(modifier = Modifier.height(16.dp))
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.tertiaryContainer
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFFFFB74D).copy(alpha = 0.15f), // Orange tint
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFB74D).copy(alpha = 0.3f))
                 ) {
                     Row(
                         modifier = Modifier
@@ -220,38 +445,23 @@ fun GlobalDetectionCard(
                                 imageVector = Icons.Default.Timer,
                                 contentDescription = null,
                                 modifier = Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.tertiary
+                                tint = Color(0xFFFFB74D) // Orange
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "남은 시간: ${formatRemainingTime(remainingPauseTime)}",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                                color = TextWhite
                             )
                         }
                         TextButton(onClick = onResumeClick) {
-                            Text("재개")
+                            Text("재개", color = Color(0xFFFFB74D), fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             }
 
-            // 일시 중지 버튼 (활성화 상태이고 일시 중지 아닐 때)
-            if (isEnabled && !isPaused) {
-                Spacer(modifier = Modifier.height(16.dp))
-                OutlinedButton(
-                    onClick = onPauseClick,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Pause,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("일시 중지")
-                }
-            }
+
         }
     }
 }
@@ -260,80 +470,147 @@ fun GlobalDetectionCard(
 fun AppSettingsCard(
     disabledApps: Set<String>,
     onAppToggle: (String, Boolean) -> Unit,
-    onEnableAll: () -> Unit
+    onEnableAll: () -> Unit,
+    onEnableApps: (Collection<String>) -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp)
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(20.dp)
         ) {
-            // 모두 활성화 버튼 (비활성화된 앱이 있을 때만)
-            if (disabledApps.isNotEmpty()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    TextButton(onClick = onEnableAll) {
+            // 1. Header Section
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(
-                            imageVector = Icons.Default.RestartAlt,
+                            imageVector = Icons.Default.Apps,
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(24.dp),
+                            tint = MaterialTheme.colorScheme.primary
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("모두 활성화")
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Text(
+                            text = "개별 탐지 설정",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "아래 앱을 선택해주세요",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
+                
+                if (disabledApps.isNotEmpty()) {
+                    IconButton(
+                        onClick = onEnableAll,
+                        colors = IconButtonDefaults.iconButtonColors(
+                            contentColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = "모두 활성화",
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                }
             }
 
-            // 앱 목록
-            monitoredApps.forEachIndexed { index, app ->
-                val isEnabled = app.packageName !in disabledApps
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // 2. Grouped App List
+            val groupedApps = monitoredApps.groupBy { it.category }
+            
+            groupedApps.forEach { (category, apps) ->
+                val appsInGroup = apps.map { it.packageName }
+                val isAnyDisabledInGroup = appsInGroup.any { it in disabledApps }
 
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { onAppToggle(app.packageName, !isEnabled) }
-                        .padding(vertical = 12.dp, horizontal = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = app.icon,
-                            contentDescription = null,
-                            modifier = Modifier.size(24.dp),
-                            tint = if (isEnabled)
-                                MaterialTheme.colorScheme.primary
-                            else
-                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                        )
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Text(
-                            text = app.displayName,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = if (isEnabled)
-                                MaterialTheme.colorScheme.onSurface
-                            else
-                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                    Text(
+                        text = category,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    
+                    if (isAnyDisabledInGroup) {
+                        IconButton(
+                            onClick = { onEnableApps(appsInGroup) },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = "$category 그룹 활성화",
+                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                            )
+                        }
+                    }
+                }
+                
+                apps.forEach { app ->
+                    val isEnabled = app.packageName !in disabledApps
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)) // Card-like background
+                            .clickable { onAppToggle(app.packageName, !isEnabled) }
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = app.icon,
+                                contentDescription = null,
+                                modifier = Modifier.size(24.dp),
+                                tint = if (isEnabled) Color(0xFF34C759) else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Text(
+                                text = app.displayName,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        ModernSwitch(
+                            checked = isEnabled,
+                            onCheckedChange = { onAppToggle(app.packageName, it) }
                         )
                     }
-                    Switch(
-                        checked = isEnabled,
-                        onCheckedChange = { onAppToggle(app.packageName, it) }
-                    )
                 }
-
-                if (index < monitoredApps.size - 1) {
-                    Divider(
-                        modifier = Modifier.padding(start = 48.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                    )
+                
+                if (category != groupedApps.keys.last()) {
+                    Spacer(modifier = Modifier.height(12.dp))
                 }
             }
         }
@@ -345,70 +622,114 @@ fun PauseDetectionDialog(
     onDismiss: () -> Unit,
     onPause: (PauseDuration) -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = {
-            Icon(
-                imageVector = Icons.Default.Timer,
-                contentDescription = null,
-                modifier = Modifier.size(28.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-        },
-        title = {
-            Text(
-                text = "탐지 일시 중지",
-                fontWeight = FontWeight.Bold
-            )
-        },
-        text = {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
             Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                // Header
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFFFB74D).copy(alpha = 0.1f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Timer,
+                        contentDescription = null,
+                        modifier = Modifier.size(28.dp),
+                        tint = Color(0xFFFFB74D)
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
                 Text(
-                    text = "일시 중지 시간을 선택하세요",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = "탐지 일시 중지",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
+                
                 Spacer(modifier = Modifier.height(8.dp))
-
-                PauseDuration.entries.forEach { duration ->
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onPause(duration) },
-                        color = MaterialTheme.colorScheme.surfaceVariant
-                    ) {
+                
+                Text(
+                    text = "일시 중지할 시간을 선택하세요",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                // Duration Options in Grid or List
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    PauseDuration.entries.chunked(2).forEach { rowItems ->
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Text(
-                                text = duration.label,
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                            Icon(
-                                imageVector = Icons.Default.ChevronRight,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            rowItems.forEach { duration ->
+                                Surface(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable { onPause(duration) },
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = duration.label,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+                            // Fill empty space if row has only 1 item
+                            if (rowItems.size == 1) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
                         }
                     }
                 }
-            }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("취소")
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                // Cancel Button
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = "취소",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
-    )
+    }
 }
 
 /**
@@ -424,4 +745,312 @@ private fun formatRemainingTime(remainingMs: Long): String {
         minutes > 0 -> "${minutes}분"
         else -> "1분 미만"
     }
+}
+
+/**
+ * 권한 상태 카드
+ */
+@Composable
+
+fun PermissionsCard(
+    isAccessibilityEnabled: Boolean,
+    isOverlayEnabled: Boolean,
+    onRefresh: () -> Unit
+) {
+    val context = LocalContext.current
+    
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isAccessibilityEnabled && isOverlayEnabled) Color(0xFF34C759).copy(alpha = 0.1f)
+                                else Color(0xFFE53935).copy(alpha = 0.1f)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isAccessibilityEnabled && isOverlayEnabled)
+                                Icons.Default.CheckCircle
+                            else
+                                Icons.Default.Warning,
+                            contentDescription = null,
+                            modifier = Modifier.size(24.dp),
+                            tint = if (isAccessibilityEnabled && isOverlayEnabled)
+                                Color(0xFF34C759)
+                            else
+                                Color(0xFFE53935)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Text(
+                            text = if (isAccessibilityEnabled && isOverlayEnabled)
+                                "모든 권한이 활성화됨"
+                            else
+                                "권한이 필요합니다",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = if (isAccessibilityEnabled && isOverlayEnabled)
+                                "앱이 정상적으로 작동합니다"
+                            else
+                                "아래 권한을 활성화해주세요",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                IconButton(onClick = onRefresh) {
+                    Icon(Icons.Default.Refresh, contentDescription = "새로고침", tint = MaterialTheme.colorScheme.onSurface)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // 접근성 서비스 권한
+            PermissionRow(
+                title = "접근성 서비스",
+                description = "메시지 모니터링에 필요",
+                isEnabled = isAccessibilityEnabled,
+                onClick = {
+                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                    context.startActivity(intent)
+                }
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 화면 위에 표시 권한
+            PermissionRow(
+                title = "화면 위에 표시",
+                description = "스캠 경고 배너 표시에 필요",
+                isEnabled = isOverlayEnabled,
+                onClick = {
+                    val intent = Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:${context.packageName}")
+                    )
+                    context.startActivity(intent)
+                }
+            )
+        }
+    }
+}
+
+/**
+ * 개별 권한 행
+ */
+@Composable
+fun PermissionRow(
+    title: String,
+    description: String = "",
+    isEnabled: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f))
+            .clickable(onClick = onClick)
+            .padding(16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f)
+        ) {
+            Icon(
+                imageVector = if (isEnabled) Icons.Default.CheckCircle else Icons.Default.Warning,
+                contentDescription = null,
+                tint = if (isEnabled) Color(0xFF34C759) else Color(0xFFE53935),
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Column {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                if (description.isNotEmpty()) {
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        if (!isEnabled) {
+            Button(
+                onClick = onClick,
+                modifier = Modifier.padding(start = 8.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFE53935),
+                    contentColor = Color.White
+                ),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text("활성화", fontSize = 13.sp)
+            }
+        } else {
+            Icon(
+                imageVector = Icons.Default.Done,
+                contentDescription = "활성화됨",
+                tint = Color(0xFF34C759),
+                modifier = Modifier.padding(start = 8.dp)
+            )
+        }
+    }
+}
+
+// ============================================
+// Preview
+// ============================================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Preview(showBackground = true, showSystemUi = true)
+@Composable
+fun SettingsScreenPreview() {
+    com.onguard.presentation.theme.OnGuardTheme {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            // Preview를 위한 Mock UI State
+            val mockUiState = SettingsUiState(
+                settings = com.onguard.data.local.DetectionSettings(
+                    isDetectionEnabled = true,
+                    pauseUntilTimestamp = 0L,
+                    disabledApps = setOf("com.whatsapp", "com.discord")
+                ),
+                isLoading = false,
+                showPauseDialog = false,
+                isAccessibilityEnabled = true,
+                isOverlayEnabled = false
+            )
+            
+            // Mock 화면 구조 (ViewModel 없이 직접 UI 렌더링)
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text("설정", fontWeight = FontWeight.Bold) },
+                        navigationIcon = {
+                            IconButton(onClick = {}) {
+                                Icon(Icons.Default.ArrowBack, contentDescription = "뒤로")
+                            }
+                        }
+                    )
+                }
+            ) { paddingValues ->
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues)
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    contentPadding = PaddingValues(vertical = 16.dp)
+                ) {
+
+                    // 전역 탐지 설정
+                    item {
+                        GlobalDetectionCard(
+                            isEnabled = mockUiState.settings.isDetectionEnabled,
+                            isPaused = false,
+                            remainingPauseTime = 0,
+                            detectionStartTime = 0L,
+                            sessionAccumulatedTime = 0L,
+                            onToggle = {},
+                            onPauseClick = {},
+                            onResumeClick = {}
+                        )
+                    }
+
+                    // 권한 상태 섹션
+                    item {
+                        Text(
+                            text = "권한 설정",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "앱이 정상 작동하려면 아래 권한이 필요합니다",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    item {
+                        PermissionsCard(
+                            isAccessibilityEnabled = mockUiState.isAccessibilityEnabled,
+                            isOverlayEnabled = mockUiState.isOverlayEnabled,
+                            onRefresh = {}
+                        )
+                    }
+
+                    item {
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
+                    // 앱별 탐지 설정
+                    item {
+                        Text(
+                            text = "앱별 설정",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        Text(
+                            text = "특정 앱에서 탐지를 비활성화할 수 있습니다",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    item {
+                        AppSettingsCard(
+                            disabledApps = mockUiState.settings.disabledApps,
+                            onAppToggle = { _, _ -> },
+                            onEnableAll = {},
+                            onEnableApps = {}
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+/**
+ * 시간(밀리초)을 "HH:mm:ss" 형식으로 변환
+ */
+private fun formatDuration(durationMs: Long): String {
+    val seconds = durationMs / 1000
+    val h = seconds / 3600
+    val m = (seconds % 3600) / 60
+    val s = seconds % 60
+    return String.format("%02d:%02d:%02d", h, m, s)
 }

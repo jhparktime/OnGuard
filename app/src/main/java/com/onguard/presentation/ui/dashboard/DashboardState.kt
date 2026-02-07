@@ -14,10 +14,17 @@ data class DashboardUiState(
 
     // 중간 차트 카드 통계
     val totalKeywords: Int = 100,
-    val totalDetectionHours: Int = 5000,
+    val totalDetectionValue: Int = 5000,
+    val totalDetectionUnit: String = "시간",
 
     // 하단 일일 위험 탐지 섹션
     val dailyStats: DailyRiskStats = DailyRiskStats(),
+    
+    // 보호 상태 관련
+    val isProtected: Boolean = false, // 권한 + 탐지 활성화 여부
+    val isAccessibilityEnabled: Boolean = false,
+    val isOverlayEnabled: Boolean = false,
+    val isDetectionEnabled: Boolean = false,
     
     val isLoading: Boolean = false
 )
