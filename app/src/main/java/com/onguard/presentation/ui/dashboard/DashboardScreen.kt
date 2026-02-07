@@ -43,6 +43,7 @@ import com.onguard.R
 import com.onguard.presentation.theme.*
 import java.util.*
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 
 enum class DashboardState {
     INITIAL, DETAILS, EXPANDED
@@ -53,6 +54,9 @@ enum class DashboardState {
 fun DashboardScreen(
     state: DashboardUiState = DashboardUiState()
 ) {
+    // Context for navigation
+    val context = LocalContext.current
+    
     // 상태 정의
     var dashboardState by remember { mutableStateOf(DashboardState.INITIAL) }
     var selectedTab by remember { mutableStateOf(DashboardTab.RATIO) }
@@ -132,31 +136,64 @@ fun DashboardScreen(
             .background(BrandGradient)
             .pointerInput(dashboardState) { // Key로 state를 사용하여 재구성 방지
                 var accumulatedDrag = 0f
-                detectVerticalDragGestures(
-                    onDragEnd = {
-                        // 드래그 종료 시 누적 값을 기준으로 상태 전환 (한 번만)
-                        val threshold = 100f // 임계값을 크게 설정하여 의도적인 스와이프만 감지
-                        if (accumulatedDrag < -threshold) { // 위로 스와이프
-                            when (dashboardState) {
-                                DashboardState.INITIAL -> dashboardState = DashboardState.DETAILS
-                                DashboardState.DETAILS -> dashboardState = DashboardState.EXPANDED
-                                else -> {}
-                            }
-                        } else if (accumulatedDrag > threshold) { // 아래로 스와이프
-                            when (dashboardState) {
-                                DashboardState.EXPANDED -> dashboardState = DashboardState.INITIAL // 바로 초기화면으로
-                                DashboardState.DETAILS -> dashboardState = DashboardState.INITIAL
-                                else -> {}
-                            }
-                        }
-                        accumulatedDrag = 0f // 초기화
+                var totalDragX = 0f
+                var totalDragY = 0f
+                var isHorizontalDrag = false
+                
+                detectDragGestures(
+                    onDragStart = { 
+                        accumulatedDrag = 0f 
+                        totalDragX = 0f
+                        totalDragY = 0f
+                        isHorizontalDrag = false
                     },
-                    onDragCancel = {
-                        accumulatedDrag = 0f // 취소 시 초기화
+                    onDragEnd = {
+                        if (isHorizontalDrag) {
+                            // 수평 스와이프 (왼쪽으로, 설정 화면 이동)
+                            if (totalDragX < -150f) {
+                                val intent = android.content.Intent(context, com.onguard.presentation.ui.settings.SettingsActivity::class.java)
+                                context.startActivity(intent)
+                                if (context is android.app.Activity) {
+                                    context.overridePendingTransition(
+                                        com.onguard.R.anim.slide_in_right,
+                                        com.onguard.R.anim.slide_out_left
+                                    )
+                                }
+                            }
+                        } else {
+                            // 수직 스와이프 (기존 로직)
+                            val threshold = 100f
+                            if (accumulatedDrag < -threshold) { // 위로 스와이프
+                                when (dashboardState) {
+                                    DashboardState.INITIAL -> dashboardState = DashboardState.DETAILS
+                                    DashboardState.DETAILS -> dashboardState = DashboardState.EXPANDED
+                                    else -> {}
+                                }
+                            } else if (accumulatedDrag > threshold) { // 아래로 스와이프
+                                when (dashboardState) {
+                                    DashboardState.EXPANDED -> dashboardState = DashboardState.INITIAL // 바로 초기화면으로
+                                    DashboardState.DETAILS -> dashboardState = DashboardState.INITIAL
+                                    else -> {}
+                                }
+                            }
+                            accumulatedDrag = 0f
+                        }
                     }
                 ) { change, dragAmount ->
                     change.consume()
-                    accumulatedDrag += dragAmount // 드래그 양 누적
+                    totalDragX += dragAmount.x
+                    totalDragY += dragAmount.y
+                    
+                    // 방향 결정 (초기 움직임으로 판단)
+                    if (!isHorizontalDrag && kotlin.math.abs(totalDragX) > kotlin.math.abs(totalDragY)) {
+                       if (kotlin.math.abs(totalDragX) > 20f) { // 약간의 threshold
+                           isHorizontalDrag = true
+                       }
+                    }
+                    
+                    if (!isHorizontalDrag) {
+                        accumulatedDrag += dragAmount.y
+                    }
                 }
             }
     ) {
@@ -200,7 +237,14 @@ fun DashboardScreen(
                     // 설정 아이콘 버튼
                     IconButton(
                         onClick = { 
-                            // TODO: 설정 화면으로 이동
+                            val intent = android.content.Intent(context, com.onguard.presentation.ui.settings.SettingsActivity::class.java)
+                            context.startActivity(intent)
+                            if (context is android.app.Activity) {
+                                context.overridePendingTransition(
+                                    com.onguard.R.anim.slide_in_right,
+                                    com.onguard.R.anim.slide_out_left
+                                )
+                            }
                         },
                         modifier = Modifier
                             .size(28.dp)
@@ -218,6 +262,8 @@ fun DashboardScreen(
                     }
                 }
             }
+
+
 
             Spacer(modifier = Modifier.height(40.dp))
 
@@ -241,7 +287,9 @@ fun DashboardScreen(
                     .padding(top = statusBadgeTopPadding),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                StatusBadge(state.status)
+                ProtectionStatusBadge(
+                    isProtected = state.isProtected
+                )
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
                     text = "%,d".format(state.totalDetectionCount),
@@ -256,7 +304,7 @@ fun DashboardScreen(
                     color = TextWhite.copy(alpha = 0.9f),
                     fontWeight = FontWeight.Medium
                 )
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(16.dp))
                 
                 // 탐지 문자 위험도 카드 (항상 표시)
                 Box(
@@ -301,9 +349,9 @@ fun DashboardScreen(
                             modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            RiskStatItem("고위험", state.highRiskCount, RiskHigh)
-                            RiskStatItem("중위험", state.mediumRiskCount, RiskMedium)
-                            RiskStatItem("저위험", state.lowRiskCount, RiskLow)
+                            RiskStatItem("고위험 문구", state.highRiskCount, RiskHigh)
+                            RiskStatItem("중위험 문구", state.mediumRiskCount, RiskMedium)
+                            RiskStatItem("저위험 문구", state.lowRiskCount, RiskLow)
                         }
                     }
                 }
@@ -326,7 +374,7 @@ fun DashboardScreen(
                     modifier = Modifier.weight(1f)
                 )
                 ChartStatCard(
-                    "탐지 시간", state.totalDetectionHours.toString(), SearhTime, "시간",
+                    "탐지 시간", state.totalDetectionValue.toString(), SearhTime, state.totalDetectionUnit,
                     chartPlaceholder = { MiniBarChart(SearhTime) },
                     modifier = Modifier.weight(1f)
                 )
@@ -819,7 +867,7 @@ fun RiskStatItem(label: String, count: Int, color: Color) {
             )
             Spacer(modifier = Modifier.width(4.dp))
             Text(
-                text = "회",
+                text = "개",
                 fontSize = 12.sp,
                 color = TextSecondary,
                 modifier = Modifier.padding(bottom = 3.dp)

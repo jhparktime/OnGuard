@@ -3,6 +3,7 @@
 package com.onguard.presentation.ui.dashboard
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -373,6 +374,112 @@ fun DetailedRiskCard(
                                 )
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+// ==== 보호 상태 배지 (글래스모피즘) ====
+@Composable
+fun ProtectionStatusBadge(
+    isProtected: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val backgroundColor = if (isProtected) {
+        Color(0xFF143D95) // 보호중 - 파란색
+    } else {
+        Color(0xFF5E0B0B) // 미보호 - 빨간색
+    }
+    
+    val statusText = if (isProtected) "보호중" else "미보호"
+    
+    // 더 세련된 글래스모피즘 박스
+    Box(
+        modifier = modifier
+            .height(40.dp)
+            .width(100.dp)
+    ) {
+        // 배경 그림자 레이어 (깊이감 추가)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(2.dp)
+                .clip(RoundedCornerShape(26.dp))
+                .background(
+                    androidx.compose.ui.graphics.Brush.radialGradient(
+                        colors = listOf(
+                            backgroundColor.copy(alpha = 0.15f),
+                            Color.Transparent
+                        ),
+                        radius = 120f
+                    )
+                )
+        )
+        
+        // 메인 글래스 카드
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(1.dp),
+            shape = RoundedCornerShape(26.dp),
+            color = Color.Transparent,
+            border = androidx.compose.foundation.BorderStroke(
+                width = 1.dp,
+                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.2f),
+                        Color.White.copy(alpha = 0.05f)
+                    )
+                )
+            )
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        androidx.compose.ui.graphics.Brush.verticalGradient(
+                            colors = listOf(
+                                backgroundColor.copy(alpha = 0.12f),
+                                backgroundColor.copy(alpha = 0.06f)
+                            )
+                        )
+                    )
+                    .background(
+                        androidx.compose.ui.graphics.Brush.linearGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.1f),
+                                Color.Transparent,
+                                Color.White.copy(alpha = 0.02f)
+                            ),
+                            start = androidx.compose.ui.geometry.Offset(0f, 0f),
+                            end = androidx.compose.ui.geometry.Offset(300f, 300f)
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                ) {
+                    // 아이콘 (배경 없음)
+                    Icon(
+                        imageVector = if (isProtected) Icons.Default.Shield else Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = backgroundColor,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    
+                    Spacer(modifier = Modifier.width(8.dp))
+                    
+                    Text(
+                        text = statusText,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = backgroundColor,
+                        style = MaterialTheme.typography.titleMedium
+                    )
                 }
             }
         }
