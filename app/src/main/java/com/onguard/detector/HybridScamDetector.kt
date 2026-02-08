@@ -38,7 +38,6 @@ class HybridScamDetector @Inject constructor(
     private val keywordMatcher: KeywordMatcher,
     private val urlAnalyzer: UrlAnalyzer,
     private val phoneAnalyzer: PhoneAnalyzer,
-    private val scamLlmClient: ScamLlmClient,
     private val accountAnalyzer: AccountAnalyzer,
     private val scamLlmClient: ScamLlmClient
 ) {
@@ -49,12 +48,8 @@ class HybridScamDetector @Inject constructor(
         // 최종 스캠 판정 임계값: 결합된 신뢰도가 0.5를 넘으면 스캠으로 간주
         private const val FINAL_SCAM_THRESHOLD = 0.5f
 
-        // 고위험 임계값: 70% 이상이면 즉시 스캠 판정
-        private const val HIGH_CONFIDENCE_THRESHOLD = 0.7f
-
-        // 중위험 임계값: 40% 이상이면 추가 조합 분석 수행
+        // LLM 트리거 구간 내 임계값 (0.4 ~ 0.7 구간은 중위험으로 관리)
         private const val MEDIUM_CONFIDENCE_THRESHOLD = 0.4f
-        private const val LOW_CONFIDENCE_THRESHOLD = 0.25f
 
         // LLM 분석 조건: Rule-based 결과가 애매한 경우(0.5~1.0) + 금전/긴급/URL 신호 존재
         private const val LLM_TRIGGER_LOW = 0.5f
@@ -183,6 +178,8 @@ class HybridScamDetector @Inject constructor(
                 detectedKeywords = keywordResult.detectedKeywords
             )
 
+            // LLM 분석 호출
+            val llmResult = scamLlmClient.analyze(request)
 
             if (llmResult != null) {
                 return combineResults(
