@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingStart="12dp"
+    android:paddingTop="38dp"
+    android:paddingEnd="12dp"
+    android:paddingBottom="10dp">
+
+    <!-- Left side: Combined Logo + Timer -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="end"
+        android:layout_marginEnd="8dp">
+
+        <ImageView
+            android:id="@+id/logo_combined_collapsed"
+            android:layout_width="100dp"
+            android:layout_height="30dp"
+            android:src="@drawable/lg_logo_red_white"
+            android:scaleType="fitCenter"
+            android:contentDescription="OnGuard 로고 통합" />
+
+        <Chronometer
+            android:id="@+id/timer_collapsed"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="0dp"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="@android:color/white"
+            android:gravity="end"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <!-- Right side: Handle -->
+    <ImageView
+        android:layout_width="12dp"
+        android:layout_height="56dp"
+        android:src="@drawable/bg_floating_control_collapsed"
+        android:scaleType="fitCenter"
+        android:contentDescription="핸들" />
+
+</LinearLayout>

@@ -1,0 +1,2 @@
+"IgnoreCase","LineNumber","Line","Filename","Path","Pattern","Context","Matches"
+"True","269","    private fun observeSettings() {","ScamDetectionAccessibilityService.kt","C:\WorkSpace\Hub\IIT_DealGuard\OnGuard\app\src\main\java\com\onguard\service\ScamDetectionAccessibilityService.kt","fun observeSettings",,"System.Text.RegularExpressions.Match[]"

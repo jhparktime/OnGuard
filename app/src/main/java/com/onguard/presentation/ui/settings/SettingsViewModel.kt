@@ -5,8 +5,10 @@ import android.content.Context
 import android.provider.Settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.content.Intent
 import com.onguard.data.local.DetectionSettings
 import com.onguard.data.local.DetectionSettingsDataStore
+import com.onguard.service.FloatingControlService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -61,7 +63,35 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsStore.settingsFlow.collect { settings ->
                 _uiState.update { it.copy(settings = settings, isLoading = false) }
+                manageWidgetService(settings)
             }
+        }
+    }
+
+    private fun manageWidgetService(settings: DetectionSettings) {
+        val isOverlayEnabled = Settings.canDrawOverlays(context)
+        
+        // Calculate Chronometer base time: elapsedRealtime - (currentTime - detectionStartTime)
+        val currentTime = System.currentTimeMillis()
+        val elapsedRealtime = android.os.SystemClock.elapsedRealtime()
+        val isPaused = settings.pauseUntilTimestamp > 0 && currentTime < settings.pauseUntilTimestamp
+        
+        val calculatedStartTime = if (settings.detectionStartTime > 0) {
+            elapsedRealtime - (currentTime - settings.detectionStartTime)
+        } else {
+            elapsedRealtime
+        }
+
+        val serviceIntent = Intent(context, FloatingControlService::class.java).apply {
+            putExtra(FloatingControlService.EXTRA_START_TIME, calculatedStartTime)
+            putExtra(FloatingControlService.EXTRA_IS_ACTIVE, settings.isDetectionEnabled)
+            putExtra(FloatingControlService.EXTRA_IS_PAUSED, isPaused)
+        }
+
+        if (isOverlayEnabled && settings.isWidgetEnabled) {
+            context.startService(serviceIntent)
+        } else if (!settings.isWidgetEnabled || !isOverlayEnabled) {
+            context.stopService(serviceIntent)
         }
     }
 
@@ -77,15 +107,13 @@ class SettingsViewModel @Inject constructor(
                 // 활성화 시도 시 권한 재확인
                 checkPermissions()
                 val currentState = _uiState.value
-                if (!currentState.isAccessibilityEnabled || !currentState.isOverlayEnabled) {
-                    // 권한 없으면 활성화 불가 (UI에서 메시지 등을 처리해야 할 수도 있음)
-                    // 현재는 그냥 무시하거나 토스트 메시지가 필요할 수 있음.
-                    // 간단히 권한이 있을 때만 활성화
+                if (!currentState.settings.canStartDetection(currentState.isAccessibilityEnabled, currentState.isOverlayEnabled)) {
+                    // 권한이나 앱 선택이 유효하지 않으면 활성화 불가
                     return@launch
                 }
                 
                 // 만약 모든 앱이 비활성화 상태라면, 탐지 활성화 시 모든 앱도 같이 활성화
-                if (currentState.settings.disabledApps.containsAll(SUPPORTED_PACKAGES)) {
+                if (currentState.settings.disabledApps.containsAll(DetectionSettings.SUPPORTED_PACKAGES)) {
                     settingsStore.enableAllApps()
                 }
             }
@@ -127,6 +155,15 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
+     * 제어 위젯 활성화/비활성화
+     */
+    fun setWidgetEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setWidgetEnabled(enabled)
+        }
+    }
+
+    /**
      * 특정 앱 탐지 설정
      */
     fun setAppEnabled(packageName: String, enabled: Boolean) {
@@ -154,27 +191,13 @@ class SettingsViewModel @Inject constructor(
                 // 하지만 요구사항이 단순하므로 ViewModel에서 처리.
                 
                 val currentDisabled = _uiState.value.settings.disabledApps + packageName
-                if (currentDisabled.containsAll(SUPPORTED_PACKAGES)) {
+                if (currentDisabled.containsAll(DetectionSettings.SUPPORTED_PACKAGES)) {
                     setDetectionEnabled(false)
                 }
             }
         }
     }
     
-    companion object {
-        private val SUPPORTED_PACKAGES = setOf(
-            "com.kakao.talk",
-            "org.telegram.messenger",
-            "jp.naver.line.android",
-            "com.facebook.orca",
-            "com.google.android.apps.messaging",
-            "com.samsung.android.messaging",
-            "com.instagram.android",
-            "com.whatsapp",
-            "com.discord",
-            "kr.co.daangn"
-        )
-    }
 
     /**
      * 모든 앱 탐지 활성화
@@ -208,10 +231,22 @@ class SettingsViewModel @Inject constructor(
             )
         }
 
-        // 권한이 하나라도 없으면 스캠 탐지 자동 비활성화
-        if (!isAccessibilityEnabled || !isOverlayEnabled) {
-            viewModelScope.launch {
-                settingsStore.setDetectionEnabled(false)
+        // 권한이 없거나 선택된 앱이 없으면 탐지 즉시 중단
+        val currentSettings = _uiState.value.settings
+        if (!currentSettings.canStartDetection(isAccessibilityEnabled, isOverlayEnabled)) {
+            if (currentSettings.isDetectionEnabled) {
+                viewModelScope.launch {
+                    settingsStore.setDetectionEnabled(false)
+                }
+            }
+        }
+
+        // 오버레이 권한이 없으면 위젯 설정도 자동 비활성화
+        if (!isOverlayEnabled) {
+            if (currentSettings.isWidgetEnabled) {
+                viewModelScope.launch {
+                    settingsStore.setWidgetEnabled(false)
+                }
             }
         }
     }

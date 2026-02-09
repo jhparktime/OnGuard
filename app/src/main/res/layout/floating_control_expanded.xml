@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:paddingStart="10dp"
+    android:paddingEnd="10dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="10dp">
+
+    <!-- Logo (positioned outside, top-left) -->
+    <ImageView
+        android:id="@+id/logo"
+        android:layout_width="100dp"
+        android:layout_height="30dp"
+        android:layout_alignParentStart="true"
+        android:layout_alignParentTop="true"
+        android:layout_marginStart="25dp"
+        android:src="@drawable/lg_logo_red_white"
+        android:adjustViewBounds="true"
+        android:scaleType="fitStart"
+        android:contentDescription="OnGuard 로고" />
+
+    <!-- Timer (positioned outside, top-right) -->
+    <Chronometer
+        android:id="@+id/timer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentStart="true"
+        android:layout_alignParentTop="true"
+        android:layout_marginStart="180dp"
+        android:textColor="@android:color/white"
+        android:textSize="17sp"
+        android:textStyle="bold" />
+
+    <!-- Main Rounded Capsule Box (contains all buttons) -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/logo"
+        android:layout_marginTop="0dp"
+        android:background="@drawable/bg_floating_control_expanded"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="10dp">
+
+        <!-- Close/Collapse Button (Chevron) -->
+        <FrameLayout
+            android:id="@+id/btn_close"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true">
+
+            <ImageView
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:adjustViewBounds="true"
+                android:contentDescription="축소"
+                android:padding="5dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_action_minimazation" />
+        </FrameLayout>
+
+        <Space
+            android:layout_width="4dp"
+            android:layout_height="1dp" />
+
+        <!-- Open App -->
+        <FrameLayout
+            android:id="@+id/btn_open_app"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true">
+
+            <ImageView
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:adjustViewBounds="true"
+                android:contentDescription="앱 열기"
+                android:padding="5dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_action_fullscreen" />
+        </FrameLayout>
+
+        <Space
+            android:layout_width="4dp"
+            android:layout_height="1dp" />
+
+        <!-- Accessibility Settings -->
+        <FrameLayout
+            android:id="@+id/btn_accessibility_settings"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true">
+
+            <ImageView
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:adjustViewBounds="true"
+                android:contentDescription="접근성 설정"
+                android:padding="5dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_access_red" />
+        </FrameLayout>
+
+        <Space
+            android:layout_width="4dp"
+            android:layout_height="1dp" />
+
+        <!-- Overlay Settings -->
+        <FrameLayout
+            android:id="@+id/btn_overlay_settings"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true">
+
+            <ImageView
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:adjustViewBounds="true"
+                android:contentDescription="오버레이 설정"
+                android:padding="5dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_access_blue" />
+        </FrameLayout>
+
+        <Space
+            android:layout_width="6dp"
+            android:layout_height="1dp" />
+
+        <!-- Pause/Stop Button Group (White Capsule) -->
+        <LinearLayout
+            android:id="@+id/capsule_pause_stop"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_button_capsule_white"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingStart="6dp"
+            android:paddingTop="4dp"
+            android:paddingEnd="6dp"
+            android:paddingBottom="4dp">
+
+            <!-- Pause/Resume -->
+            <FrameLayout
+                android:id="@+id/btn_pause_resume"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="true">
+
+                <ImageView
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:adjustViewBounds="false"
+                    android:contentDescription="일시정지/재생"
+                    android:padding="4dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_action_pause" />
+            </FrameLayout>
+
+            <Space
+                android:id="@+id/space_pause_stop"
+                android:layout_width="4dp"
+                android:layout_height="1dp" />
+
+            <!-- Stop -->
+            <FrameLayout
+                android:id="@+id/btn_stop"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="true">
+
+                <ImageView
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:adjustViewBounds="false"
+                    android:contentDescription="중지"
+                    android:padding="4dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_action_end" />
+            </FrameLayout>
+        </LinearLayout>
+    </LinearLayout>
+</RelativeLayout>

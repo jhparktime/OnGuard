@@ -33,4 +33,10 @@ object DebugLog {
             Log.w(tag, message())
         }
     }
+
+    fun errorLog(tag: String, message: String, throwable: Throwable? = null) {
+        if (BuildConfig.DEBUG) {
+            Log.e(tag, message, throwable)
+        }
+    }
 }

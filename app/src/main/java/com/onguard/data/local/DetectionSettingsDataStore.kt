@@ -47,8 +47,40 @@ data class DetectionSettings(
     val sessionAccumulatedTime: Long = 0L,
 
     /** 전체 누적 탐지 시간 (밀리초) - 대시보드 표시용 */
-    val totalAccumulatedTime: Long = 0L
+    val totalAccumulatedTime: Long = 0L,
+
+    /** 제어 위젯 활성화 여부 */
+    val isWidgetEnabled: Boolean = true
 ) {
+    companion object {
+        val SUPPORTED_PACKAGES = setOf(
+            "com.kakao.talk",
+            "org.telegram.messenger",
+            "jp.naver.line.android",
+            "com.facebook.orca",
+            "com.google.android.apps.messaging",
+            "com.samsung.android.messaging",
+            "com.instagram.android",
+            "com.whatsapp",
+            "com.discord",
+            "kr.co.daangn"
+        )
+    }
+
+    /**
+     * 탐지를 시작할 수 있는 상태인지 확인 (권한 + 앱 선택)
+     */
+    fun canStartDetection(isAccessibilityEnabled: Boolean, isOverlayEnabled: Boolean): Boolean {
+        // 1. 필수 권한 체크
+        if (!isAccessibilityEnabled || !isOverlayEnabled) return false
+        
+        // 2. 최소 하나 이상의 앱이 활성화되어 있는지 체크
+        // 모든 지원 앱이 disabledApps에 들어있으면 시작 불가
+        if (disabledApps.containsAll(SUPPORTED_PACKAGES)) return false
+        
+        return true
+    }
+
     /**
      * 현재 탐지가 활성 상태인지 확인
      *
@@ -80,6 +112,21 @@ data class DetectionSettings(
         val remaining = pauseUntilTimestamp - System.currentTimeMillis()
         return if (remaining > 0) remaining else 0
     }
+
+    /**
+     * Chronometer의 base 필드에 설정할 값을 계산 (SystemClock.elapsedRealtime() 기준)
+     * 알림, 위젯, 앱 대시보드 모두 이 값을 공유하여 동기화함.
+     */
+    fun calculateChronometerBase(elapsedRealtime: Long = android.os.SystemClock.elapsedRealtime()): Long {
+        val now = System.currentTimeMillis()
+        val currentSegment = if (isActiveNow() && detectionStartTime > 0) {
+            now - detectionStartTime
+        } else {
+            0L
+        }
+        val totalSessionMs = sessionAccumulatedTime + currentSegment
+        return elapsedRealtime - totalSessionMs
+    }
 }
 
 @Singleton
@@ -95,6 +142,7 @@ class DetectionSettingsDataStore @Inject constructor(
         private val KEY_DETECTION_START_TIME = longPreferencesKey("detection_start_time")
         private val KEY_SESSION_ACCUMULATED_TIME = longPreferencesKey("session_accumulated_time")
         private val KEY_TOTAL_ACCUMULATED_TIME = longPreferencesKey("total_accumulated_time")
+        private val KEY_WIDGET_ENABLED = booleanPreferencesKey("widget_enabled")
     }
 
     /**
@@ -107,7 +155,8 @@ class DetectionSettingsDataStore @Inject constructor(
             disabledApps = preferences[KEY_DISABLED_APPS] ?: emptySet(),
             detectionStartTime = preferences[KEY_DETECTION_START_TIME] ?: 0L,
             sessionAccumulatedTime = preferences[KEY_SESSION_ACCUMULATED_TIME] ?: 0L,
-            totalAccumulatedTime = preferences[KEY_TOTAL_ACCUMULATED_TIME] ?: 0L
+            totalAccumulatedTime = preferences[KEY_TOTAL_ACCUMULATED_TIME] ?: 0L,
+            isWidgetEnabled = preferences[KEY_WIDGET_ENABLED] ?: true
         )
     }
 
@@ -137,6 +186,15 @@ class DetectionSettingsDataStore @Inject constructor(
                 preferences[KEY_SESSION_ACCUMULATED_TIME] = 0L
                 preferences[KEY_PAUSE_UNTIL] = 0L
             }
+        }
+    }
+
+    /**
+     * 제어 위젯 활성화/비활성화 설정
+     */
+    suspend fun setWidgetEnabled(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[KEY_WIDGET_ENABLED] = enabled
         }
     }
 
