@@ -210,7 +210,11 @@ class HybridScamDetector @Inject constructor(
             ruleConfidence.coerceIn(0f, 1f),
             combinedReasons,
             keywordResult.detectedKeywords,
-            hasExternalDbHit
+            hasExternalDbHit,
+            highRiskKeywords = keywordResult.highRiskKeywords,
+            mediumRiskKeywords = keywordResult.mediumRiskKeywords,
+            lowRiskKeywords = keywordResult.lowRiskKeywords,
+            hasCombination = keywordResult.hasSuspiciousCombination
         )
     }
 
@@ -245,6 +249,10 @@ class HybridScamDetector @Inject constructor(
             confidence = combinedConfidence,
             reasons = allReasons,
             detectedKeywords = detectedKeywords,
+            highRiskKeywords = llmResult.highRiskKeywords, // LLM 결과가 있으면 그걸 우선적으로 사용하거나 룰 결과와 합침
+            mediumRiskKeywords = llmResult.mediumRiskKeywords,
+            lowRiskKeywords = llmResult.lowRiskKeywords,
+            hasSuspiciousCombination = llmResult.hasSuspiciousCombination,
             detectionMethod = DetectionMethod.HYBRID,
             scamType = llmResult.scamType,
             warningMessage = llmResult.warningMessage,
@@ -259,13 +267,21 @@ class HybridScamDetector @Inject constructor(
      * @param reasons 탐지 사유 목록
      * @param detectedKeywords 탐지된 키워드
      * @param hasUrlIssues URL 이상 여부 (HYBRID vs RULE_BASED 구분용)
+     * @param highRiskKeywords 고위험 키워드
+     * @param mediumRiskKeywords 중위험 키워드
+     * @param lowRiskKeywords 저위험 키워드
+     * @param hasCombination 조합 발견 여부
      * @return [ScamAnalysis]
      */
     private fun createRuleBasedResult(
         confidence: Float,
         reasons: List<String>,
         detectedKeywords: List<String>,
-        hasUrlIssues: Boolean
+        hasUrlIssues: Boolean,
+        highRiskKeywords: List<String> = emptyList(),
+        mediumRiskKeywords: List<String> = emptyList(),
+        lowRiskKeywords: List<String> = emptyList(),
+        hasCombination: Boolean = false
     ): ScamAnalysis {
         // Rule-based에서 스캠 유형 추론
         val scamType = ScamTypeInferrer.inferScamType(reasons)
@@ -278,6 +294,10 @@ class HybridScamDetector @Inject constructor(
             confidence = confidence,
             reasons = reasons,
             detectedKeywords = detectedKeywords,
+            highRiskKeywords = highRiskKeywords,
+            mediumRiskKeywords = mediumRiskKeywords,
+            lowRiskKeywords = lowRiskKeywords,
+            hasSuspiciousCombination = hasCombination,
             detectionMethod = if (hasUrlIssues) DetectionMethod.HYBRID else DetectionMethod.RULE_BASED,
             scamType = scamType,
             warningMessage = warningMessage,

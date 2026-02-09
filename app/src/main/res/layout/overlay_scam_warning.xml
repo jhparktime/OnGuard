@@ -1,204 +1,312 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_margin="12dp"
+    android:layout_margin="16dp"
     android:background="@drawable/overlay_card_background"
-    android:elevation="8dp">
+    android:elevation="8dp"
+    android:gravity="center_horizontal"
+    android:orientation="vertical"
+    android:padding="24dp">
 
+    <!-- Header: Warning Icons + Title -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:id="@+id/header_icon_left"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:src="@drawable/ic_warnning"
+            android:tint="#F5A623"
+            android:adjustViewBounds="true" />
+
+        <TextView
+            android:id="@+id/scam_type_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="8dp"
+            android:fontFamily="@font/pretendard"
+            android:text="피싱 의심 문자"
+            android:textColor="#F5A623"
+            android:textSize="24sp"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:id="@+id/header_icon_right"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:src="@drawable/ic_warnning"
+            android:tint="#F5A623"
+            android:adjustViewBounds="true" />
+    </LinearLayout>
+
+    <!-- Confidence Level -->
+    <TextView
+        android:id="@+id/confidence_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:fontFamily="@font/pretendard"
+        android:text="65% 위험도"
+        android:textColor="#F5A623"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+
+    <!-- Warning Message -->
+    <TextView
+        android:id="@+id/warning_message"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:fontFamily="@font/pretendard"
+        android:gravity="center"
+        android:lineSpacingExtra="4dp"
+        android:text="이 대화는 피싱 유형으로 강하게 의심됩니다.\n상대방의 요청을 바로 따르지 말고 한 번 더 확인하세요."
+        android:textColor="#666666"
+        android:textSize="15sp" />
+
+    <!-- Risk Factor Analysis Section (Hidden by default in Summary view) -->
+    <LinearLayout
+        android:id="@+id/analysis_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:fontFamily="@font/pretendard"
+            android:text="위험 요소 분석"
+            android:textColor="#000000"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <!-- High Risk -->
+        <LinearLayout
+            android:id="@+id/high_risk_row"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <ImageView
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:src="@drawable/ic_magnifyingglass_cross"
+                android:tint="#E56856"
+                android:adjustViewBounds="true" />
+
+            <TextView
+                android:id="@+id/high_risk_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:fontFamily="@font/pretendard"
+                android:text="고위험 0개 발견"
+                android:textColor="#E56856"
+                android:textSize="14sp" />
+
+            <!-- Horizontal Scroll for Tags -->
+            <HorizontalScrollView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:id="@+id/high_risk_tags"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+                </LinearLayout>
+            </HorizontalScrollView>
+        </LinearLayout>
+
+        <!-- Medium Risk -->
+        <LinearLayout
+            android:id="@+id/medium_risk_row"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <ImageView
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:src="@drawable/ic_magnifyingglass_exclamation"
+                android:tint="#F5A623"
+                android:adjustViewBounds="true" />
+
+            <TextView
+                android:id="@+id/medium_risk_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:fontFamily="@font/pretendard"
+                android:text="중위험 0개 발견"
+                android:textColor="#F5A623"
+                android:textSize="14sp" />
+
+            <HorizontalScrollView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:id="@+id/medium_risk_tags"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal" />
+            </HorizontalScrollView>
+        </LinearLayout>
+
+        <!-- Low Risk -->
+        <LinearLayout
+            android:id="@+id/low_risk_row"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <ImageView
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:src="@drawable/ic_magnifyingglass_question"
+                android:tint="#ECC94B"
+                android:adjustViewBounds="true" />
+
+            <TextView
+                android:id="@+id/low_risk_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:fontFamily="@font/pretendard"
+                android:text="저위험 0개 발견"
+                android:textColor="#D69E2E"
+                android:textSize="14sp" />
+
+            <HorizontalScrollView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:id="@+id/low_risk_tags"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+                </LinearLayout>
+            </HorizontalScrollView>
+        </LinearLayout>
+
+        <!-- Combination Logic -->
+        <LinearLayout
+            android:id="@+id/combination_row"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <ImageView
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:src="@drawable/ic_magnifyingglass_text"
+                android:tint="#999999"
+                android:adjustViewBounds="true" />
+
+            <TextView
+                android:id="@+id/combination_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:fontFamily="@font/pretendard"
+                android:text="의심 조합 발견"
+                android:textColor="#999999"
+                android:textSize="14sp" />
+
+            <HorizontalScrollView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:id="@+id/combination_tags"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal" />
+            </HorizontalScrollView>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Buttons Container -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical">
+        android:layout_marginTop="24dp"
+        android:orientation="horizontal">
 
-        <!-- 상단 경고 배너 (색상이 동적으로 변경됨) -->
-        <LinearLayout
-            android:id="@+id/warning_header"
-            android:layout_width="match_parent"
+        <!-- 자세히 보기 (Summary mode only) -->
+        <ImageView
+            android:id="@+id/btn_details"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:padding="16dp"
-            android:background="#D32F2F">
+            android:layout_marginEnd="12dp"
+            android:layout_weight="1"
+            android:adjustViewBounds="true"
+            android:clickable="true"
+            android:focusable="true"
+            android:src="@drawable/btn_alarm_add_red" />
 
-            <TextView
-                android:id="@+id/warning_icon"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="⚠️"
-                android:textSize="28sp" />
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical"
-                android:layout_marginStart="12dp">
-
-                <TextView
-                    android:id="@+id/scam_type_text"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="사기 의심"
-                    android:textColor="@android:color/white"
-                    android:textSize="18sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/warning_subtitle"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="주의가 필요합니다"
-                    android:textColor="#FFFFFFCC"
-                    android:textSize="12sp"
-                    android:layout_marginTop="2dp" />
-
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:gravity="center">
-
-                <TextView
-                    android:id="@+id/confidence_text"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="85%"
-                    android:textColor="@android:color/white"
-                    android:textSize="24sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="위험도"
-                    android:textColor="#FFFFFFCC"
-                    android:textSize="10sp" />
-
-            </LinearLayout>
-
-        </LinearLayout>
-
-        <!-- 본문 영역 -->
-        <LinearLayout
-            android:layout_width="match_parent"
+        <!-- 앱에서 보기 (Analysis mode only, Hidden by default) -->
+        <ImageView
+            android:id="@+id/btn_go_app"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="16dp">
+            android:layout_marginEnd="12dp"
+            android:layout_weight="1"
+            android:adjustViewBounds="true"
+            android:clickable="true"
+            android:focusable="true"
+            android:src="@drawable/btn_alarm_app_red"
+            android:visibility="gone" />
 
-            <!-- LLM 생성 경고 메시지 -->
-            <TextView
-                android:id="@+id/warning_message"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="이 메시지는 사기로 의심됩니다."
-                android:textColor="#212121"
-                android:textSize="15sp"
-                android:lineSpacingExtra="3dp" />
-
-            <!-- 위험 요소 목록 -->
-            <LinearLayout
-                android:id="@+id/reasons_container"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:orientation="vertical"
-                android:padding="12dp"
-                android:background="#FFF3E0"
-                android:visibility="gone">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="📌 위험 요소"
-                    android:textColor="#E65100"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/reasons_text"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:text="• 선입금 요구\n• 안전결제 우회"
-                    android:textColor="#BF360C"
-                    android:textSize="13sp"
-                    android:lineSpacingExtra="3dp" />
-
-            </LinearLayout>
-
-            <!-- 의심 문구 (하이라이트) -->
-            <LinearLayout
-                android:id="@+id/suspicious_parts_container"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:orientation="vertical"
-                android:padding="12dp"
-                android:background="#FFEBEE"
-                android:visibility="gone">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="🔍 의심 문구"
-                    android:textColor="#C62828"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/suspicious_parts_text"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:text="&quot;먼저 입금해주시면&quot;"
-                    android:textColor="#B71C1C"
-                    android:textSize="13sp"
-                    android:textStyle="italic"
-                    android:lineSpacingExtra="2dp" />
-
-            </LinearLayout>
-
-            <!-- 버튼 영역 -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:orientation="horizontal"
-                android:gravity="end">
-
-                <Button
-                    android:id="@+id/btn_dismiss"
-                    android:layout_width="wrap_content"
-                    android:layout_height="40dp"
-                    android:minWidth="80dp"
-                    android:text="무시"
-                    android:textColor="#757575"
-                    android:textSize="14sp"
-                    android:background="@drawable/btn_overlay_transparent"
-                    android:paddingStart="16dp"
-                    android:paddingEnd="16dp" />
-
-                <Button
-                    android:id="@+id/btn_details"
-                    android:layout_width="wrap_content"
-                    android:layout_height="40dp"
-                    android:minWidth="100dp"
-                    android:layout_marginStart="8dp"
-                    android:text="상세보기"
-                    android:textColor="#1976D2"
-                    android:textSize="14sp"
-                    android:textStyle="bold"
-                    android:background="@drawable/btn_overlay_outline"
-                    android:paddingStart="20dp"
-                    android:paddingEnd="20dp" />
-
-            </LinearLayout>
-
-        </LinearLayout>
-
+        <!-- 닫기 (Always visible) -->
+        <ImageView
+            android:id="@+id/btn_dismiss"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:adjustViewBounds="true"
+            android:clickable="true"
+            android:focusable="true"
+            android:src="@drawable/btn_alarm_close_red" />
     </LinearLayout>
 
-</FrameLayout>
+</LinearLayout>

@@ -869,6 +869,22 @@ class ScamDetectionAccessibilityService : AccessibilityService() {
                         OverlayService.EXTRA_DETECTED_KEYWORDS,
                         ArrayList(analysis.detectedKeywords)
                     )
+                    putStringArrayListExtra(
+                        OverlayService.EXTRA_HIGH_RISK_KEYWORDS,
+                        ArrayList(analysis.highRiskKeywords)
+                    )
+                    putStringArrayListExtra(
+                        OverlayService.EXTRA_MEDIUM_RISK_KEYWORDS,
+                        ArrayList(analysis.mediumRiskKeywords)
+                    )
+                    putStringArrayListExtra(
+                        OverlayService.EXTRA_LOW_RISK_KEYWORDS,
+                        ArrayList(analysis.lowRiskKeywords)
+                    )
+                    putExtra(
+                        OverlayService.EXTRA_HAS_COMBINATION,
+                        analysis.hasSuspiciousCombination
+                    )
                 }
                 
                 Log.d(TAG, "Starting OverlayService with intent...")

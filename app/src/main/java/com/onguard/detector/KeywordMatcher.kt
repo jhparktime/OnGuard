@@ -191,6 +191,9 @@ class KeywordMatcher @Inject constructor() {
         val reasons = mutableListOf<String>()
         var totalConfidence = 0f
         val allDetectedKeywords = mutableListOf<String>()
+        val highKeywords = mutableListOf<String>()
+        val mediumKeywords = mutableListOf<String>()
+        val lowKeywords = mutableListOf<String>()
 
         // 1. 가중치별 키워드 분석
         weightedKeywords.forEach { (weight, keywords) ->
@@ -203,12 +206,20 @@ class KeywordMatcher @Inject constructor() {
                 totalConfidence += keywordConfidence
                 allDetectedKeywords.addAll(detected)
 
-                val level = when (weight) {
-                    KeywordWeight.CRITICAL -> "매우 위험"
-                    KeywordWeight.HIGH -> "위험"
-                    KeywordWeight.MEDIUM -> "의심"
+                when (weight) {
+                    KeywordWeight.CRITICAL -> {
+                        highKeywords.addAll(detected)
+                        reasons.add("매우 위험 키워드 ${detected.size}개 발견: ${detected.take(3).joinToString(", ")}")
+                    }
+                    KeywordWeight.HIGH -> {
+                        mediumKeywords.addAll(detected)
+                        reasons.add("위험 키워드 ${detected.size}개 발견: ${detected.take(3).joinToString(", ")}")
+                    }
+                    KeywordWeight.MEDIUM -> {
+                        lowKeywords.addAll(detected)
+                        reasons.add("의심 키워드 ${detected.size}개 발견: ${detected.take(3).joinToString(", ")}")
+                    }
                 }
-                reasons.add("$level 키워드 ${detected.size}개 발견: ${detected.take(3).joinToString(", ")}")
             }
         }
 
@@ -232,6 +243,8 @@ class KeywordMatcher @Inject constructor() {
 
             detectedPatterns.forEach { pattern ->
                 reasons.add("${pattern.description} 감지")
+                // 패턴도 태그로 표시하기 위해 중위험군에 포함 (또는 별도 분류 가능)
+                mediumKeywords.add(pattern.description)
             }
         }
 
@@ -240,9 +253,11 @@ class KeywordMatcher @Inject constructor() {
         val hasUrgency = allDetectedKeywords.any { it.contains("급하") || it.contains("빨리") || it.contains("즉시") }
         val hasAuth = allDetectedKeywords.any { it.contains("인증") || it.contains("OTP") || it.contains("비밀번호") }
 
+        var hasSuspiciousCombination = false
         if ((hasMoney && hasUrgency) || (hasMoney && hasAuth) || (hasAuth && hasUrgency)) {
             totalConfidence += 0.2f
             reasons.add("복합 스캠 패턴 (조합 공격)")
+            hasSuspiciousCombination = true
         }
 
         // 최종 신뢰도 계산 (0~1 범위로 정규화)
@@ -253,6 +268,10 @@ class KeywordMatcher @Inject constructor() {
             confidence = finalConfidence,
             reasons = reasons,
             detectedKeywords = allDetectedKeywords,
+            highRiskKeywords = highKeywords,
+            mediumRiskKeywords = mediumKeywords,
+            lowRiskKeywords = lowKeywords,
+            hasSuspiciousCombination = hasSuspiciousCombination,
             detectionMethod = DetectionMethod.RULE_BASED
         )
     }
