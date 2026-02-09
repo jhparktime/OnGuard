@@ -1,8 +1,11 @@
 package com.onguard.detector
 
+import com.onguard.domain.model.AccountAnalysisResult
 import com.onguard.domain.model.DetectionMethod
+import com.onguard.domain.model.PhoneAnalysisResult
 import com.onguard.domain.model.ScamAnalysis
 import com.onguard.domain.model.ScamType
+import com.onguard.detector.UrlAnalyzer.UrlAnalysisResult
 import com.onguard.util.DebugLog
 import com.onguard.util.PiiMasker
 import javax.inject.Inject
@@ -77,9 +80,9 @@ class HybridScamDetector @Inject constructor(
      * @return true이면 Rule-only 경로로 처리 (LLM 생략)
      */
     private fun isStrongSignal(
-        phoneResult: PhoneAnalyzerResult,
+        phoneResult: PhoneAnalysisResult,
         urlResult: UrlAnalysisResult,
-        accountResult: AccountAnalyzerResult,
+        accountResult: AccountAnalysisResult,
         hasUrgency: Boolean,
         hasMoney: Boolean,
         hasUrl: Boolean
