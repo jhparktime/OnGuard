@@ -40,9 +40,8 @@ class KeywordMatcher @Inject constructor() {
             "계좌번호알려주", "계좌번호보내", "입금해주", "송금해주", "이체해주",
             "선입금", "선결제", "선지급", "보증금입금", "착불결제",
 
-            // 긴급 사기 (매우 위험)
-            "급하게필요", "긴급송금", "지금당장", "빨리입금", "즉시송금",
-            "오늘안에", "1시간이내", "30분이내",
+            // 긴급 금전 요구 (매우 위험 - 명확한 조합만)
+            "급하게필요", "긴급송금", "빨리입금", "즉시송금",
 
             // 인증정보 요구 (매우 위험)
             "인증번호알려", "OTP번호", "보안카드번호", "비밀번호알려", "공인인증서",
@@ -54,10 +53,9 @@ class KeywordMatcher @Inject constructor() {
         ),
 
         KeywordWeight.HIGH to setOf(
-            // 금전 관련 (높은 위험)
-            "급전", "급하게", "돈필요", "빌려주세요", "대출", "현금대출", "무담보대출",
+            // 금전 관련 (높은 위험) - 일상 대화 표현 제거
+            "급전", "현금대출", "무담보대출",
             "신용대출", "소액대출", "당일대출", "즉시대출", "무서류대출",
-            "돈빌려", "돈좀", "급하게돈",
 
             // 계좌/송금 (높은 위험)
             // 주의: 은행 이름은 제거됨 (일반 대화에서 자주 언급되므로 오탐 유발)
@@ -81,7 +79,9 @@ class KeywordMatcher @Inject constructor() {
             // 투자 사기 (높은 위험)
             "원금보장", "수익보장", "고수익", "단기수익", "확실한수익",
             "비트코인투자", "코인투자", "해외선물", "FX마진", "주식리딩",
-            "리딩방", "시그널방", "VIP방", "수익인증",
+            "리딩방", "시그널방", "VIP방", "수익인증", "프리미엄방",
+            "텔레방", "오픈채팅방", "단톡방", "수익공유",
+            "따라만하세요", "복사만하세요", "무조건수익", "원금2배",
 
             // 가상화폐/NFT 사기 (높은 위험) - 신규 추가
             "이더리움", "리플", "도지코인", "NFT", "에어드랍",
@@ -91,10 +91,19 @@ class KeywordMatcher @Inject constructor() {
             // 로맨스 스캠 (높은 위험) - 신규 추가
             "사랑해요", "보고싶어요", "결혼하고싶어", "만나고싶어",
             "항공권비용", "비자비용", "병원비", "수술비",
-            "외국에있는데", "해외출장중"
+            "외국에있는데", "해외출장중", "군인이라서", "선물보내고싶어",
+            "세관문제", "통관비용", "짐보관비", "호텔비"
         ),
 
         KeywordWeight.MEDIUM to setOf(
+            // 일상 대화 표현 (중간 위험으로 완화)
+            "급하게", "돈필요", "빌려주세요", "대출",
+            "돈빌려", "돈좀", "급하게돈",
+            
+            // 축약형/이모티콘 표현 (신규 추가)
+            "계좌ㄱ", "송금ㄱ", "입금ㄱ", "리딩방ㄱ",
+            "계ㄱ", "돈ㄱ", "급ㄱ",
+            
             // 의심스러운 제안 (중간 위험)
             "당첨", "환급", "세금", "환불", "보상금", "지원금", "장려금",
             "무료증정", "무료지급", "무료제공", "무료나눔",
@@ -123,13 +132,20 @@ class KeywordMatcher @Inject constructor() {
             "문자확인", "링크클릭", "앱설치", "프로그램설치", "원격제어",
             "팀뷰어", "애니데스크", "화면공유", "비밀보장", "절대비밀",
 
+            // 긴급성 표현 (중간 위험으로 완화 - 조합에서만 의미)
+            "긴급", "지금당장", "오늘안에", "빨리", "즉시",
+            "1시간이내", "30분이내", "시간없어", "마감임박",
+            
             // SNS/계정 관련 (중간 위험) - 신규 추가
             "계정복구", "계정잠김", "로그인시도", "의심스러운활동",
             "인스타그램", "페이스북", "카카오계정", "네이버계정",
 
             // 정부 지원금 사칭 (중간 위험) - 신규 추가
             "긴급재난지원금", "소상공인지원", "청년지원금", "복지급여",
-            "정부지원", "지원대상자", "신청기한"
+            "정부지원", "지원대상자", "신청기한",
+            
+            // 일반 거래/알바 표현 (중간 위험)
+            "재택", "부업", "투잡", "간단업무", "쉬운일"
         )
     )
 
@@ -236,14 +252,43 @@ class KeywordMatcher @Inject constructor() {
         }
 
         // 3. 조합 패턴 보너스 (여러 카테고리 동시 발견 시 위험도 증가)
-        val hasMoney = allDetectedKeywords.any { it.contains("급전") || it.contains("송금") || it.contains("입금") }
-        val hasUrgency = allDetectedKeywords.any { it.contains("급하") || it.contains("빨리") || it.contains("즉시") }
-        val hasAuth = allDetectedKeywords.any { it.contains("인증") || it.contains("OTP") || it.contains("비밀번호") }
-
-        if ((hasMoney && hasUrgency) || (hasMoney && hasAuth) || (hasAuth && hasUrgency)) {
-            totalConfidence += 0.2f
-            reasons.add("복합 스캠 패턴 (조합 공격)")
+        val hasMoney = allDetectedKeywords.any { 
+            it.contains("급전") || it.contains("송금") || it.contains("입금") || 
+            it.contains("계좌") || it.contains("이체") 
         }
+        val hasUrgency = allDetectedKeywords.any { 
+            it.contains("급하") || it.contains("빨리") || it.contains("즉시") || 
+            it.contains("긴급") || it.contains("지금당장") || it.contains("오늘안에")
+        }
+        val hasAuth = allDetectedKeywords.any { 
+            it.contains("인증") || it.contains("OTP") || it.contains("비밀번호") ||
+            it.contains("보안카드")
+        }
+        val hasInvestment = allDetectedKeywords.any {
+            it.contains("수익") || it.contains("투자") || it.contains("리딩") ||
+            it.contains("보장")
+        }
+
+        // 위험한 조합 보너스 (조합일 때만 높은 점수)
+        var comboBonus = 0f
+        if (hasMoney && hasUrgency) {
+            comboBonus += 0.15f  // 금전 + 긴급
+            reasons.add("복합 스캠 패턴: 금전 요구 + 긴급성")
+        }
+        if (hasMoney && hasAuth) {
+            comboBonus += 0.2f  // 금전 + 인증 (더 위험)
+            reasons.add("복합 스캠 패턴: 금전 요구 + 인증 정보")
+        }
+        if (hasAuth && hasUrgency) {
+            comboBonus += 0.15f  // 인증 + 긴급
+            reasons.add("복합 스캠 패턴: 인증 정보 + 긴급성")
+        }
+        if (hasInvestment && hasMoney) {
+            comboBonus += 0.1f  // 투자 + 금전
+            reasons.add("복합 스캠 패턴: 투자 사기")
+        }
+        
+        totalConfidence += comboBonus
 
         // 최종 신뢰도 계산 (0~1 범위로 정규화)
         val finalConfidence = totalConfidence.coerceIn(0f, 1f)

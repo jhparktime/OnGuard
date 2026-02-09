@@ -216,7 +216,18 @@ class LLMScamDetector @Inject constructor() : ScamLlmClient {
         }
 
         return """
-            시스템: 당신은 사용자에게 스캠(사기) 위험을 알리는 도우미입니다. 메시지와 룰 기반 탐지 정보를 바탕으로 사기 가능 여부를 판단하고, 사용자가 위험을 쉽게 인식할 수 있도록 간단하고 명확하게 안내합니다.
+            시스템: 당신은 스캠(사기) 위험을 판단하는 전문가입니다. **친구·가족·지인 간의 일상 대화**와 **실제 사기 메시지**를 정확히 구분해야 합니다.
+            
+            # 핵심 원칙
+            1. **맥락이 일상 대화라면 매우 낮은 점수 (10-25)를 주어 알림을 방지하세요**
+               - 친구: "돈 좀 빌려줄래?" → confidence: 10-20 (정상 대화)
+               - 가족: "급하게 필요한데 입금 좀" → confidence: 15-25 (일상 부탁)
+               
+            2. **명확한 사기 신호가 여러 개 있을 때만 높은 점수 (70+)**
+               - 낯선 번호 + 긴급 + 금전 + URL → confidence: 75-90
+               - DB 등록 전화번호/계좌 → confidence: 85-95
+               
+            3. **애매하면 중간 (30-50)으로 주되, 경고 문구에서 불확실성 명시**
 
             [최근 대화]
             $recentBlock
@@ -228,27 +239,57 @@ class LLMScamDetector @Inject constructor() : ScamLlmClient {
             - 룰 기반 탐지 이유: $reasonsText
             - 탐지된 키워드: $keywordsText
 
-            요청:
-            아래 JSON 형식으로 응답하세요. warningMessage는 반드시 2~3문장으로, 왜 이 메시지를 스캠으로 의심했는지(예: 금전 요구, 긴급성, 의심 URL, 사칭 등)를 사용자에게 쉽게 설명하세요. 다른 텍스트는 포함하지 말고 JSON만 출력하세요.
+            # Confidence 점수 가이드 (0~100 정수)
+            
+            **10-25 (정상/매우 낮음)**: 일상 대화 맥락
+            - 친구/가족 간 돈 빌리는 대화
+            - 일상적 거래 약속 ("입금했어", "계좌 알려줘")
+            - 금전 관련 단어가 있어도 **대화 흐름이 자연스러움**
+            - 예: "돈 좀 빌려줄래?", "급하게 필요해", "계좌번호 알려줘"
+            
+            **30-50 (주의/애매)**: 불확실한 상황
+            - 맥락이 부족해 판단 어려움
+            - 금전 요구 + 다소 이상한 표현
+            - 최근 대화 없이 갑자기 금전 요구
+            
+            **60-75 (위험)**: 사기 가능성 높음
+            - 긴급성 + 금전 + 의심 URL/전화번호
+            - 기관 사칭 표현
+            - 투자/대출 유도 + 고수익 보장
+            
+            **80-95 (매우 위험)**: 명백한 사기
+            - Counter Scam 112 DB 등록 번호
+            - KISA 악성 URL
+            - 경찰청 사기계좌 DB 등록
+            - 긴급 + 금전 + 인증정보 요구
 
-            JSON 필드 설명:
-            - confidence: 사기 가능성 (0~100 정수, 50 이상이면 사기 의심)
-            - scamType: 사기 유형 (INVESTMENT/USED_TRADE/PHISHING/VOICE_PHISHING/IMPERSONATION/LOAN/UNKNOWN 중 하나)
-              * VOICE_PHISHING: 보이스피싱/스미싱 (전화번호 기반 사기)
-            - warningMessage: 사용자에게 보여줄 경고 문구. 2~3문장, 한국어. 왜 스캠 가능성을 봤는지 간단히 설명한 뒤, 행동 권고(의심 링크 클릭 금지 등)를 한 문장으로.
-            - reasons: 탐지 이유 목록 (짧고 명확하게, 예: "긴급 송금 유도", "피싱 URL 포함")
-            - suspiciousParts: 원문에서 의심되는 표현 인용 (최대 3개)
-
-            출력 형식:
+            # 출력 형식
+            JSON만 출력하세요. 다른 텍스트 포함 금지.
+            
             ```json
             {
-              "confidence": 75,
-              "scamType": "PHISHING",
-              "warningMessage": "금전 요구와 긴급성 표현이 함께 있어 사기 가능성이 있습니다. 의심스러운 링크가 포함된 메시지입니다. 알 수 없는 링크는 클릭하지 마세요.",
-              "reasons": ["피싱 URL 감지", "긴급 유도 표현"],
-              "suspiciousParts": ["지금 바로 클릭", "bit.ly/xxx"]
+              "confidence": 15,
+              "scamType": "UNKNOWN",
+              "warningMessage": "친구 간 대화로 보입니다. 금전 관련 단어가 있지만 일상적인 맥락입니다.",
+              "reasons": ["금전 키워드 감지"],
+              "suspiciousParts": []
             }
             ```
+            
+            **warningMessage 작성 규칙:**
+            - confidence 10-25: "일상 대화로 보입니다" 또는 "정상 대화 가능성 높습니다"
+            - confidence 30-50: "주의가 필요할 수 있습니다" + 이유
+            - confidence 60+: "사기 가능성이 있습니다" + 구체적 위험 요소 + 행동 권고
+            - 2-3문장, 한국어, 사용자 친화적
+            
+            **scamType 선택:**
+            - INVESTMENT: 투자/코인/주식 사기
+            - USED_TRADE: 중고거래/택배 사기
+            - PHISHING: 피싱 링크/URL
+            - VOICE_PHISHING: 보이스피싱/스미싱 (전화번호 기반)
+            - IMPERSONATION: 기관/지인 사칭
+            - LOAN: 대출 사기
+            - UNKNOWN: 일반 또는 불명확
         """.trimIndent()
     }
 
